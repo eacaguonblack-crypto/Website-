@@ -3,73 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ultra-Wide ASCII</title>
+    <title>400x300 ASCII PRO</title>
     <style>
         body { 
             margin: 0; 
             background: #000; 
-            color: #fff; 
-            font-family: 'Courier New', monospace; 
             overflow: hidden; 
             display: flex; 
-            flex-direction: column; 
+            justify-content: center; 
             align-items: center; 
-            height: 100vh; 
+            height: 100vh;
         }
-        /* Adjusted for high density */
-        #ascii-container { 
-            line-height: 4px; 
-            font-size: 4px; 
-            white-space: pre; 
-            letter-spacing: 0.5px;
-            margin-top: 5px;
+        /* We use a visible canvas now for high performance */
+        #output-canvas {
+            width: 100vw;
+            height: auto;
+            image-rendering: pixelated;
         }
         .controls { 
             position: fixed; 
             bottom: 20px; 
-            display: flex; 
-            gap: 10px; 
             z-index: 10; 
             background: rgba(0,0,0,0.8);
-            padding: 10px;
-            border-radius: 10px;
+            padding: 10px 20px;
+            border-radius: 30px;
+            display: flex;
+            gap: 15px;
         }
         button { 
             background: #444; 
             color: white; 
-            border: none; 
+            border: 1px solid #666; 
             padding: 8px 15px; 
-            border-radius: 5px; 
-            font-size: 12px;
+            border-radius: 20px; 
+            font-family: monospace;
         }
-        video, canvas { display: none; }
+        video, #hidden-canvas { display: none; }
     </style>
 </head>
 <body>
 
-    <div id="ascii-container"></div>
+    <canvas id="output-canvas"></canvas>
     
     <div class="controls">
-        <button id="switch-btn">Flip Cam</button>
-        <span id="res-label" style="font-size: 10px; color: #aaa; align-self: center;">120 wide</span>
+        <button id="switch-btn">Flip Camera</button>
+        <div style="color: #0f0; font-family: monospace; font-size: 12px; align-self: center;">400 x 300</div>
     </div>
 
     <video id="video" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
+    <canvas id="hidden-canvas"></canvas>
 
     <script>
         const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        const asciiContainer = document.getElementById('ascii-container');
-        const switchBtn = document.getElementById('switch-btn');
+        const hiddenCanvas = document.getElementById('hidden-canvas');
+        const outputCanvas = document.getElementById('output-canvas');
+        const hCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
+        const oCtx = outputCanvas.getContext('2d');
 
         const chars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
         
-        // --- High Density Settings ---
-        const width = 120; // Number of characters per line
-        const height = 90; // Number of lines
-        // -----------------------------
+        // --- Rectangular 400x300 Settings ---
+        const width = 400; 
+        const height = 300;
+        const charWidth = 6;  // Size of each character in pixels
+        const charHeight = 8;
+        // ------------------------------------
 
         let currentFacingMode = "user";
 
@@ -84,7 +82,7 @@
                 });
                 video.srcObject = stream;
             } catch (err) {
-                asciiContainer.innerHTML = "Camera Access Error";
+                alert("Camera Error: " + err.message);
             }
         }
 
@@ -95,15 +93,49 @@
 
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = width;
-                canvas.height = height;
+                // 1. Process Video in background
+                hiddenCanvas.width = width;
+                hiddenCanvas.height = height;
                 
-                // Draw and flip horizontally for selfie mode
-                context.save();
+                hCtx.save();
                 if (currentFacingMode === "user") {
-                    context.translate(width, 0);
-                    context.scale(-1, 1);
+                    hCtx.translate(width, 0);
+                    hCtx.scale(-1, 1);
                 }
+                hCtx.drawImage(video, 0, 0, width, height);
+                hCtx.restore();
+
+                const pixels = hCtx.getImageData(0, 0, width, height).data;
+
+                // 2. Prepare Output Canvas
+                outputCanvas.width = width * charWidth;
+                outputCanvas.height = height * charHeight;
+                oCtx.fillStyle = "black";
+                oCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+                oCtx.font = `${charHeight}px monospace`;
+
+                // 3. Draw ASCII
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const i = (y * width + x) * 4;
+                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+                        const charIndex = Math.floor((brightness / 256) * chars.length);
+                        const char = chars[charIndex] || " ";
+
+                        oCtx.fillStyle = `rgb(${r},${g},${b})`;
+                        oCtx.fillText(char, x * charWidth, y * charHeight);
+                    }
+                }
+            }
+            requestAnimationFrame(render);
+        }
+
+        video.addEventListener('play', () => requestAnimationFrame(render));
+        initCamera();
+    </script>
+</body>
+</html>
                 context.drawImage(video, 0, 0, width, height);
                 context.restore();
 

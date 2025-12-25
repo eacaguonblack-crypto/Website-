@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>HD ASCII CAM</title>
+    <title>Ultra-Wide ASCII</title>
     <style>
         body { 
             margin: 0; 
@@ -16,30 +16,31 @@
             align-items: center; 
             height: 100vh; 
         }
+        /* Adjusted for high density */
         #ascii-container { 
-            line-height: 6px; 
-            font-size: 6px; 
+            line-height: 4px; 
+            font-size: 4px; 
             white-space: pre; 
-            letter-spacing: 1px;
-            margin-top: 10px;
+            letter-spacing: 0.5px;
+            margin-top: 5px;
         }
         .controls { 
             position: fixed; 
-            bottom: 30px; 
+            bottom: 20px; 
             display: flex; 
             gap: 10px; 
             z-index: 10; 
-            background: rgba(0,0,0,0.7);
-            padding: 15px;
-            border-radius: 50px;
+            background: rgba(0,0,0,0.8);
+            padding: 10px;
+            border-radius: 10px;
         }
         button { 
-            background: #333; 
+            background: #444; 
             color: white; 
-            border: 1px solid #555; 
-            padding: 12px 20px; 
-            border-radius: 25px; 
-            font-size: 14px;
+            border: none; 
+            padding: 8px 15px; 
+            border-radius: 5px; 
+            font-size: 12px;
         }
         video, canvas { display: none; }
     </style>
@@ -49,8 +50,8 @@
     <div id="ascii-container"></div>
     
     <div class="controls">
-        <button id="switch-btn">🔄 Flip</button>
-        <button id="density-btn">Toggle Detail</button>
+        <button id="switch-btn">Flip Cam</button>
+        <span id="res-label" style="font-size: 10px; color: #aaa; align-self: center;">120 wide</span>
     </div>
 
     <video id="video" autoplay playsinline></video>
@@ -62,15 +63,14 @@
         const context = canvas.getContext('2d', { willReadFrequently: true });
         const asciiContainer = document.getElementById('ascii-container');
         const switchBtn = document.getElementById('switch-btn');
-        const densityBtn = document.getElementById('density-btn');
 
-        // Extended character sets
-        const simpleChars = "@%#*+=-:. ";
-        const complexChars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        const chars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
         
-        let chars = complexChars;
-        const width = 70; 
-        const height = 50;
+        // --- High Density Settings ---
+        const width = 120; // Number of characters per line
+        const height = 90; // Number of lines
+        // -----------------------------
+
         let currentFacingMode = "user";
 
         async function initCamera() {
@@ -84,7 +84,7 @@
                 });
                 video.srcObject = stream;
             } catch (err) {
-                asciiContainer.innerHTML = "Camera Error: " + err.message;
+                asciiContainer.innerHTML = "Camera Access Error";
             }
         }
 
@@ -93,16 +93,44 @@
             initCamera();
         });
 
-        densityBtn.addEventListener('click', () => {
-            chars = chars.length > 15 ? simpleChars : complexChars;
-        });
-
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 canvas.width = width;
                 canvas.height = height;
+                
+                // Draw and flip horizontally for selfie mode
+                context.save();
+                if (currentFacingMode === "user") {
+                    context.translate(width, 0);
+                    context.scale(-1, 1);
+                }
                 context.drawImage(video, 0, 0, width, height);
+                context.restore();
+
                 const pixels = context.getImageData(0, 0, width, height).data;
+                let html = "";
+
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const i = (y * width + x) * 4;
+                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+                        const charIndex = Math.floor((brightness / 256) * chars.length);
+                        html += `<span style="color:rgb(${r},${g},${b})">${chars[charIndex] || " "}</span>`;
+                    }
+                    html += "\n";
+                }
+                asciiContainer.innerHTML = html;
+            }
+            requestAnimationFrame(render);
+        }
+
+        video.addEventListener('play', () => requestAnimationFrame(render));
+        initCamera();
+    </script>
+</body>
+</html>
+const pixels = context.getImageData(0, 0, width, height).data;
                 let html = "";
 
                 for (let y = 0; y < height; y++) {

@@ -1,75 +1,76 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>400x300 ASCII PRO</title>
+    <title>HD ASCII CAM</title>
     <style>
         body { 
             margin: 0; 
             background: #000; 
+            color: #fff; 
+            font-family: 'Courier New', monospace; 
             overflow: hidden; 
             display: flex; 
-            justify-content: center; 
+            flex-direction: column; 
             align-items: center; 
-            height: 100vh;
+            height: 100vh; 
         }
-        /* We use a visible canvas now for high performance */
-        #output-canvas {
-            width: 100vw;
-            height: auto;
-            image-rendering: pixelated;
+        #ascii-container { 
+            line-height: 6px; 
+            font-size: 6px; 
+            white-space: pre; 
+            letter-spacing: 1px;
+            margin-top: 10px;
         }
         .controls { 
             position: fixed; 
-            bottom: 20px; 
+            bottom: 30px; 
+            display: flex; 
+            gap: 10px; 
             z-index: 10; 
-            background: rgba(0,0,0,0.8);
-            padding: 10px 20px;
-            border-radius: 30px;
-            display: flex;
-            gap: 15px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 50px;
         }
         button { 
-            background: #444; 
+            background: #333; 
             color: white; 
-            border: 1px solid #666; 
-            padding: 8px 15px; 
-            border-radius: 20px; 
-            font-family: monospace;
+            border: 1px solid #555; 
+            padding: 12px 20px; 
+            border-radius: 25px; 
+            font-size: 14px;
         }
-        video, #hidden-canvas { display: none; }
+        video, canvas { display: none; }
     </style>
 </head>
 <body>
 
-    <canvas id="output-canvas"></canvas>
+    <div id="ascii-container"></div>
     
     <div class="controls">
-        <button id="switch-btn">Flip Camera</button>
-        <div style="color: #0f0; font-family: monospace; font-size: 12px; align-self: center;">400 x 300</div>
+        <button id="switch-btn">🔄 Flip</button>
+        <button id="density-btn">Toggle Detail</button>
     </div>
 
     <video id="video" autoplay playsinline></video>
-    <canvas id="hidden-canvas"></canvas>
+    <canvas id="canvas"></canvas>
 
     <script>
         const video = document.getElementById('video');
-        const hiddenCanvas = document.getElementById('hidden-canvas');
-        const outputCanvas = document.getElementById('output-canvas');
-        const hCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
-        const oCtx = outputCanvas.getContext('2d');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        const asciiContainer = document.getElementById('ascii-container');
+        const switchBtn = document.getElementById('switch-btn');
+        const densityBtn = document.getElementById('density-btn');
 
-        const chars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        // Extended character sets
+        const simpleChars = "@%#*+=-:. ";
+        const complexChars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
         
-        // --- Rectangular 400x300 Settings ---
-        const width = 400; 
-        const height = 300;
-        const charWidth = 6;  // Size of each character in pixels
-        const charHeight = 8;
-        // ------------------------------------
-
+        let chars = complexChars;
+        const width = 70; 
+        const height = 50;
         let currentFacingMode = "user";
 
         async function initCamera() {
@@ -83,7 +84,7 @@
                 });
                 video.srcObject = stream;
             } catch (err) {
-                alert("Camera Error: " + err.message);
+                asciiContainer.innerHTML = "Camera Error: " + err.message;
             }
         }
 
@@ -92,16 +93,44 @@
             initCamera();
         });
 
+        densityBtn.addEventListener('click', () => {
+            chars = chars.length > 15 ? simpleChars : complexChars;
+        });
+
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // 1. Process Video in background
-                hiddenCanvas.width = width;
-                hiddenCanvas.height = height;
-                
-                hCtx.save();
-                if (currentFacingMode === "user") {
-                    hCtx.translate(width, 0);
-                    hCtx.scale(-1, 1);
+                canvas.width = width;
+                canvas.height = height;
+                context.drawImage(video, 0, 0, width, height);
+                const pixels = context.getImageData(0, 0, width, height).data;
+                let html = "";
+
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const i = (y * width + x) * 4;
+                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                        
+                        // Perceptual brightness
+                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+                        
+                        // Map brightness to character index
+                        const charIndex = Math.floor((brightness / 256) * chars.length);
+                        const char = chars[charIndex] || " ";
+                        
+                        html += `<span style="color:rgb(${r},${g},${b})">${char}</span>`;
+                    }
+                    html += "\n";
+                }
+                asciiContainer.innerHTML = html;
+            }
+            requestAnimationFrame(render);
+        }
+
+        video.addEventListener('play', () => requestAnimationFrame(render));
+        initCamera();
+    </script>
+</body>
+</html>
                 }
                 hCtx.drawImage(video, 0, 0, width, height);
                 hCtx.restore();

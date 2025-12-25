@@ -3,113 +3,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MAX DENSITY ASCII</title>
+    <title>COLOR SCALE ASCII</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        canvas { width: 100%; height: 100%; object-fit: cover; }
-        .ui { position: fixed; bottom: 20px; z-index: 10; display: flex; gap: 10px; }
-        button { background: rgba(0,255,0,0.2); color: #0f0; border: 1px solid #0f0; padding: 12px 20px; border-radius: 30px; font-family: monospace; font-size: 14px; backdrop-filter: blur(5px); }
+        #output { width: 100vw; height: 100vh; object-fit: cover; font-family: 'Courier New', monospace; font-weight: bold; white-space: pre; background: #000; display: block; margin: 0; }
+        .ui { position: fixed; bottom: 20px; z-index: 10; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+        .row { display: flex; gap: 10px; }
+        button { background: rgba(255, 255, 255, 0.2); color: #fff; border: 1px solid #fff; padding: 12px 20px; border-radius: 30px; font-family: monospace; font-size: 13px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
         video { display: none; }
     </style>
 </head>
 <body>
 
-    <canvas id="output"></canvas>
+    <pre id="output"></pre>
     <video id="video" autoplay playsinline muted></video>
 
     <div class="ui">
-        <button id="toggle">SWITCH CAMERA</button>
+        <div class="row">
+            <button id="toggle">CAM</button>
+            <button id="color-cycle">COLOR: FULL</button>
+        </div>
     </div>
 
     <script>
         const video = document.getElementById('video');
-        const canvas = document.getElementById('output');
-        const ctx = canvas.getContext('2d', { alpha: false });
-
-        // High Density Character Set
-        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        const output = document.getElementById('output');
+        const colorBtn = document.getElementById('color-cycle');
         
-        // Increase these for even more "pixels" (Warning: Higher = Laggier)
-        const COLS = 400; 
-        const ROWS = 300; 
+        const COLS = 180; // Optimized for stability with high density
+        const ASPECT_RATIO = 0.6; 
+        const ROWS = Math.floor(COLS * ASPECT_RATIO);
+        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
 
-        let facingMode = "environment"; 
+        let facingMode = "environment";
+        let colorMode = 0; // 0: Full, 1: Green, 2: Blue, 3: Grayscale
+        const modes = ["FULL", "GREEN", "BLUE", "GRAY"];
 
-        async function setupCamera() {
+        const tempCanvas = document.createElement('canvas');
+        const tCtx = tempCanvas.getContext('2d', { alpha: false });
+
+        async function init() {
             if (window.stream) window.stream.getTracks().forEach(t => t.stop());
             try {
                 const s = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: facingMode, width: 1280, height: 720 }
+                    video: { facingMode: facingMode, width: { ideal: 640 } }
                 });
                 window.stream = s;
                 video.srcObject = s;
-            } catch (e) { alert("Camera Error. Use HTTPS."); }
+            } catch (e) { alert("Camera Access Error"); }
         }
 
-        function render() {
+        function update() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // Set internal resolution to fit the screen 1:1 with high density
-                const dpr = window.devicePixelRatio || 1;
-                canvas.width = window.innerWidth * dpr;
-                canvas.height = window.innerHeight * dpr;
-
-                const cellW = canvas.width / COLS;
-                const cellH = canvas.height / ROWS;
-
-                // Hidden processing canvas
-                const proc = document.createElement('canvas');
-                proc.width = COLS;
-                proc.height = ROWS;
-                const pCtx = proc.getContext('2d');
+                tempCanvas.width = COLS;
+                tempCanvas.height = ROWS;
+                tCtx.drawImage(video, 0, 0, COLS, ROWS);
+                const pixels = tCtx.getImageData(0, 0, COLS, ROWS).data;
                 
-                // Flip if selfie
-                if (facingMode === "user") {
-                    pCtx.translate(COLS, 0);
-                    pCtx.scale(-1, 1);
-                }
-                pCtx.drawImage(video, 0, 0, COLS, ROWS);
-                const data = pCtx.getImageData(0, 0, COLS, ROWS).data;
-
-                ctx.fillStyle = "black";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.font = `bold ${cellH}px monospace`;
-                ctx.textAlign = "center";
-
+                let asciiFrame = "";
                 for (let y = 0; y < ROWS; y++) {
                     for (let x = 0; x < COLS; x++) {
                         const i = (y * COLS + x) * 4;
-                        const r = data[i], g = data[i+1], b = data[i+2];
-                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
-                        const char = CHARS[Math.floor((brightness / 256) * CHARS.length)];
+                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                        const avg = (r + g + b) / 3;
+                        const char = CHARS[Math.floor((avg / 255) * (CHARS.length - 1))];
+                        
+                        let finalColor;
+                        if (colorMode === 0) finalColor = `rgb(${r},${g},${b})`;
+                        else if (colorMode === 1) finalColor = `rgb(0,${avg},0)`; // Matrix Green
+                        else if (colorMode === 2) finalColor = `rgb(0,${Math.floor(avg/2)},${avg})`; // Deep Blue
+                        else finalColor = `rgb(${avg},${avg},${avg})`; // Grayscale
 
-                        ctx.fillStyle = `rgb(${r},${g},${b})`;
-                        ctx.fillText(char, x * cellW + cellW/2, y * cellH + cellH);
+                        asciiFrame += `<span style="color:${finalColor}">${char}</span>`;
                     }
+                    asciiFrame += "\n";
                 }
+                output.innerHTML = asciiFrame;
             }
-            requestAnimationFrame(render);
+            requestAnimationFrame(update);
         }
+
+        function adjustLayout() {
+            const fontSize = window.innerWidth / COLS * 1.7;
+            output.style.fontSize = fontSize + "px";
+            output.style.lineHeight = (fontSize * 0.85) + "px";
+        }
+
+        colorBtn.onclick = () => {
+            colorMode = (colorMode + 1) % modes.length;
+            colorBtn.innerText = "COLOR: " + modes[colorMode];
+        };
 
         document.getElementById('toggle').onclick = () => {
             facingMode = (facingMode === "user") ? "environment" : "user";
-            setupCamera();
+            init();
         };
 
-        window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        });
+        window.addEventListener('resize', adjustLayout);
+        video.onloadedmetadata = () => { adjustLayout(); update(); };
 
-        setupCamera();
-        video.onloadedmetadata = () => render();
-    </script>
-</body>
-</html>
-        video.onloadedmetadata = () => {
-            render();
-        };
-
-        setupCamera();
+        init();
     </script>
 </body>
 </html>

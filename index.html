@@ -1,101 +1,123 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MAX DENSITY GPU</title>
+    <title>FINAL ASCII PRO</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; }
-        canvas { width: 100vw; height: 100vh; display: block; }
-        .ui { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 10; }
-        button { background: rgba(20,20,20,0.8); color: #fff; border: 1px solid #444; padding: 12px 20px; border-radius: 30px; font-family: monospace; font-size: 14px; backdrop-filter: blur(5px); }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        canvas { width: 100vw; height: 100vh; object-fit: cover; background: #000; }
+        .controls { position: fixed; bottom: 30px; z-index: 100; display: flex; gap: 10px; }
+        button { background: rgba(40, 40, 40, 0.9); color: #fff; border: 1px solid #666; padding: 15px 20px; border-radius: 30px; font-family: monospace; font-size: 14px; font-weight: bold; }
+        video { display: none; }
     </style>
 </head>
 <body>
 
-    <canvas id="glCanvas"></canvas>
-    
-    <div class="ui">
-        <button id="flipBtn">ROTATE</button>
-        <button id="modeBtn">FULL COLOR</button>
+    <canvas id="output"></canvas>
+    <video id="video" autoplay playsinline muted></video>
+
+    <div class="controls">
+        <button id="flip">SWITCH CAM</button>
+        <button id="color">MODE: FULL</button>
     </div>
 
-    <script type="text/javascript">
-        const canvas = document.getElementById('glCanvas');
-        const gl = canvas.getContext('webgl');
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('output');
+        const ctx = canvas.getContext('2d', { alpha: false });
 
+        // --- Optimized High Density ---
+        const COLS = 150; // High density but safer for mobile CPUs
+        const ROWS = 120; // Maintain rectangular 4:3-ish aspect
+        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        
         let facingMode = "environment";
         let colorMode = 0; // 0: Full, 1: Green, 2: Blue, 3: Gray
-        const modes = ["FULL COLOR", "MATRIX GREEN", "DEEP BLUE", "GRAYSCALE"];
+        const modes = ["FULL", "GREEN", "BLUE", "GRAY"];
 
-        // High Density Settings
-        const COLS = 300.0; 
-        const ROWS = 200.0;
-
-        // Vertex Shader
-        const vsSource = `
-            attribute vec4 aVertexPosition;
-            varying vec2 vTexCoord;
-            void main() {
-                gl_Position = aVertexPosition;
-                vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
+        async function start() {
+            if (window.stream) window.stream.getTracks().forEach(t => t.stop());
+            try {
+                const s = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode, width: 640, height: 480 }
+                });
+                window.stream = s;
+                video.srcObject = s;
+                video.play();
+            } catch (e) {
+                alert("Please use HTTPS and allow camera access.");
             }
-        `;
-
-        // Fragment Shader (The magic happens here)
-        const fsSource = `
-            precision mediump float;
-            varying vec2 vTexCoord;
-            uniform sampler2D uSampler;
-            uniform float uCols;
-            uniform float uRows;
-            uniform int uColorMode;
-
-            float character(float n, vec2 p) {
-                p = floor(p * vec2(4.0, -4.0) + 0.5);
-                if (clamp(p.x, 0.0, 3.0) == p.x && clamp(p.y, 0.0, 4.0) == p.y) {
-                    if (int(mod(n / pow(2.0, p.y * 4.0 + p.x), 2.0)) == 1) return 1.0;
-                }
-                return 0.0;
-            }
-
-            void main() {
-                vec2 uv = vTexCoord;
-                // Flip texture correctly for environment/user
-                vec2 grid = vec2(uCols, uRows);
-                vec2 p = floor(uv * grid) / grid;
-                vec4 col = texture2D(uSampler, vec2(p.x, 1.0 - p.y));
-                
-                float gray = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
-                
-                // Color modes
-                vec3 finalCol;
-                if (uColorMode == 0) finalCol = col.rgb;
-                else if (uColorMode == 1) finalCol = vec3(0.0, gray, 0.0);
-                else if (uColorMode == 2) finalCol = vec3(0.0, gray * 0.5, gray);
-                else finalCol = vec3(gray);
-
-                // Simple ASCII threshold effect
-                float charMask = step(0.5, gray); 
-                gl_FragColor = vec4(finalCol * charMask, 1.0);
-            }
-        `;
-
-        // Initialize WebGL and Camera
-        let video = document.createElement('video');
-        video.autoplay = true;
-        video.playsInline = true;
-
-        async function startCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: facingMode } 
-            });
-            video.srcObject = stream;
-            video.play();
         }
 
-        function createShader(gl, type, source) {
+        function render() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                // Adjust internal canvas to match screen resolution
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+
+                const cellW = canvas.width / COLS;
+                const cellH = canvas.height / ROWS;
+
+                // Hidden tiny canvas for data sampling
+                const offscreen = document.createElement('canvas');
+                offscreen.width = COLS;
+                offscreen.height = ROWS;
+                const oCtx = offscreen.getContext('2d');
+                
+                // Draw flipped for front cam
+                if (facingMode === "user") {
+                    oCtx.translate(COLS, 0);
+                    oCtx.scale(-1, 1);
+                }
+                oCtx.drawImage(video, 0, 0, COLS, ROWS);
+                const pixels = oCtx.getImageData(0, 0, COLS, ROWS).data;
+
+                // Clear background
+                ctx.fillStyle = "black";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Font setup
+                ctx.font = `${cellH}px monospace`;
+                ctx.textAlign = "center";
+
+                for (let y = 0; y < ROWS; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        const i = (y * COLS + x) * 4;
+                        const r = pixels[i];
+                        const g = pixels[i+1];
+                        const b = pixels[i+2];
+                        const brightness = (r + g + b) / 3;
+                        
+                        const char = CHARS[Math.floor((brightness / 256) * CHARS.length)];
+
+                        // Apply color filter
+                        if (colorMode === 0) ctx.fillStyle = `rgb(${r},${g},${b})`;
+                        else if (colorMode === 1) ctx.fillStyle = `rgb(0,${brightness},0)`;
+                        else if (colorMode === 2) ctx.fillStyle = `rgb(0,${brightness/2},${brightness})`;
+                        else ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+
+                        ctx.fillText(char, x * cellW + cellW/2, y * cellH + cellH);
+                    }
+                }
+            }
+            requestAnimationFrame(render);
+        }
+
+        document.getElementById('flip').onclick = () => {
+            facingMode = facingMode === "environment" ? "user" : "environment";
+            start();
+        };
+
+        document.getElementById('color').onclick = () => {
+            colorMode = (colorMode + 1) % modes.length;
+            document.getElementById('color').innerText = "MODE: " + modes[colorMode];
+        };
+
+        start().then(() => requestAnimationFrame(render));
+    </script>
+</body>
+</html>
             const shader = gl.createShader(type);
             gl.shaderSource(shader, source);
             gl.compileShader(shader);

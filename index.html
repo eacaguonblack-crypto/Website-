@@ -1,133 +1,104 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ultra-Wide ASCII</title>
+    <title>ULTRA ASCII SMOOTH</title>
     <style>
-        body { 
-            margin: 0; 
-            background: #000; 
-            color: #fff; 
-            font-family: 'Courier New', monospace; 
-            overflow: hidden; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            height: 100vh; 
-        }
-        /* Adjusted for high density */
-        #ascii-container { 
-            line-height: 4px; 
-            font-size: 4px; 
-            white-space: pre; 
-            letter-spacing: 0.5px;
-            margin-top: 5px;
-        }
-        .controls { 
-            position: fixed; 
-            bottom: 20px; 
-            display: flex; 
-            gap: 10px; 
-            z-index: 10; 
-            background: rgba(0,0,0,0.8);
-            padding: 10px;
-            border-radius: 10px;
-        }
-        button { 
-            background: #444; 
-            color: white; 
-            border: none; 
-            padding: 8px 15px; 
-            border-radius: 5px; 
-            font-size: 12px;
-        }
-        video, canvas { display: none; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #output { width: 100vw; height: 100vh; object-fit: cover; font-family: 'Courier New', monospace; font-weight: bold; white-space: pre; background: #000; display: block; }
+        .ui { position: fixed; bottom: 30px; z-index: 10; }
+        button { background: rgba(0, 255, 0, 0.3); color: #0f0; border: 1px solid #0f0; padding: 15px 25px; border-radius: 50px; font-family: monospace; font-size: 16px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+        video { display: none; }
     </style>
 </head>
 <body>
 
-    <div id="ascii-container"></div>
-    
-    <div class="controls">
-        <button id="switch-btn">Flip Cam</button>
-        <span id="res-label" style="font-size: 10px; color: #aaa; align-self: center;">120 wide</span>
-    </div>
+    <pre id="output"></pre>
+    <video id="video" autoplay playsinline muted></video>
 
-    <video id="video" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
+    <div class="ui">
+        <button id="toggle">ROTATE CAMERA</button>
+    </div>
 
     <script>
         const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        const asciiContainer = document.getElementById('ascii-container');
-        const switchBtn = document.getElementById('switch-btn');
-
-        const chars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        const output = document.getElementById('output');
         
-        // --- High Density Settings ---
-        const width = 120; // Number of characters per line
-        const height = 90; // Number of lines
-        // -----------------------------
+        // --- PERFORMANCE TUNING ---
+        // 200 is the 'Smooth Max'. You can try 250, but 200 usually keeps 60fps.
+        const COLS = 200; 
+        const ASPECT_RATIO = 3/4; // Rectangular
+        const ROWS = Math.floor(COLS * ASPECT_RATIO);
+        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        // --------------------------
 
-        let currentFacingMode = "user";
+        let facingMode = "environment";
+        const tempCanvas = document.createElement('canvas');
+        const tCtx = tempCanvas.getContext('2d', { alpha: false });
 
-        async function initCamera() {
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-            }
+        async function init() {
+            if (window.stream) window.stream.getTracks().forEach(t => t.stop());
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: currentFacingMode }, 
-                    audio: false 
+                const s = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode, width: { ideal: 640 }, height: { ideal: 480 } }
                 });
-                video.srcObject = stream;
-            } catch (err) {
-                asciiContainer.innerHTML = "Camera Access Error";
-            }
+                window.stream = s;
+                video.srcObject = s;
+            } catch (e) { console.error(e); }
         }
 
-        switchBtn.addEventListener('click', () => {
-            currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
-            initCamera();
-        });
-
-        function render() {
+        function update() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = width;
-                canvas.height = height;
+                tempCanvas.width = COLS;
+                tempCanvas.height = ROWS;
+
+                // Process image in memory
+                tCtx.drawImage(video, 0, 0, COLS, ROWS);
+                const pixels = tCtx.getImageData(0, 0, COLS, ROWS).data;
                 
-                // Draw and flip horizontally for selfie mode
-                context.save();
-                if (currentFacingMode === "user") {
-                    context.translate(width, 0);
-                    context.scale(-1, 1);
-                }
-                context.drawImage(video, 0, 0, width, height);
-                context.restore();
-
-                const pixels = context.getImageData(0, 0, width, height).data;
-                let html = "";
-
-                for (let y = 0; y < height; y++) {
-                    for (let x = 0; x < width; x++) {
-                        const i = (y * width + x) * 4;
-                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
-                        const charIndex = Math.floor((brightness / 256) * chars.length);
-                        html += `<span style="color:rgb(${r},${g},${b})">${chars[charIndex] || " "}</span>`;
+                let asciiFrame = "";
+                for (let y = 0; y < ROWS; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        const i = (y * COLS + x) * 4;
+                        const r = pixels[i];
+                        const g = pixels[i+1];
+                        const b = pixels[i+2];
+                        
+                        // Fast brightness calc
+                        const avg = (r + g + b) / 3;
+                        const char = CHARS[Math.floor((avg / 255) * (CHARS.length - 1))];
+                        
+                        // We use hex colors for the text - this is the fastest way to render color text
+                        asciiFrame += `<span style="color:rgb(${r},${g},${b})">${char}</span>`;
                     }
-                    html += "\n";
+                    asciiFrame += "\n";
                 }
-                asciiContainer.innerHTML = html;
+                output.innerHTML = asciiFrame;
             }
-            requestAnimationFrame(render);
+            requestAnimationFrame(update);
         }
 
-        video.addEventListener('play', () => requestAnimationFrame(render));
-        initCamera();
+        // Adjust font size to fit screen perfectly
+        function adjustLayout() {
+            const fontSize = window.innerWidth / COLS * 1.8;
+            output.style.fontSize = fontSize + "px";
+            output.style.lineHeight = (fontSize * 0.8) + "px";
+        }
+
+        document.getElementById('toggle').onclick = () => {
+            facingMode = (facingMode === "user") ? "environment" : "user";
+            init();
+        };
+
+        window.addEventListener('resize', adjustLayout);
+        video.onloadedmetadata = () => {
+            adjustLayout();
+            update();
+        };
+
+        init();
     </script>
 </body>
 </html>
+

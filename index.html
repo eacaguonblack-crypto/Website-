@@ -1,38 +1,40 @@
+
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Hand Pitch Visualizer</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <title>Hand Pitch Pro</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <style>
-    body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #121212; color: white; margin: 0; overflow: hidden; }
-    .container { position: relative; width: 100vw; height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-    canvas { border-radius: 15px; box-shadow: 0 0 30px rgba(0, 255, 204, 0.2); max-width: 90%; }
-    #status { font-size: 2rem; margin-bottom: 10px; color: #00ffcc; font-weight: bold; text-shadow: 0 0 10px #00ffcc; }
-    #startBtn { position: absolute; z-index: 10; padding: 20px 40px; font-size: 1.5rem; cursor: pointer; border-radius: 50px; border: none; background: #00ffcc; color: black; font-weight: bold; transition: 0.3s; }
-    #startBtn:hover { transform: scale(1.1); background: #fff; }
-    video { display: none; } /* Hide the raw video feed */
+    body { margin: 0; background: #000; color: #0f0; font-family: monospace; text-align: center; overflow: hidden; }
+    canvas { width: 100vw; height: 100vh; object-fit: contain; }
+    #ui { position: absolute; top: 20px; width: 100%; pointer-events: none; }
+    #startBtn { 
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        padding: 20px 40px; font-size: 20px; background: #0f0; color: #000; 
+        border: none; cursor: pointer; font-weight: bold; pointer-events: all;
+    }
   </style>
 </head>
 <body>
 
-  <div class="container">
-    <div id="status">Pinch Fingers to Play</div>
-    <button id="startBtn">START THEREMIN</button>
-    <canvas id="output_canvas" width="1280" height="720"></canvas>
-    <video id="input_video"></video>
+  <div id="ui">
+    <h1 id="pitchDisp">0 Hz</h1>
+    <p id="status">Warming up camera...</p>
   </div>
+  <button id="startBtn">ENABLE AUDIO & CAMERA</button>
+  
+  <video id="input_video" style="display:none"></video>
+  <canvas id="output_canvas"></canvas>
 
   <script>
     const videoElement = document.getElementById('input_video');
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
-    const statusDiv = document.getElementById('status');
+    const pitchDisp = document.getElementById('pitchDisp');
     const startBtn = document.getElementById('startBtn');
 
     let audioCtx, oscillator, gainNode;
-    let audioStarted = false;
 
     function initAudio() {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -43,58 +45,41 @@
       oscillator.connect(gainNode);
       gainNode.connect(audioCtx.destination);
       oscillator.start();
-      audioStarted = true;
       startBtn.style.display = 'none';
+      document.getElementById('status').innerText = "Ready! Show Hand";
     }
 
-    startBtn.addEventListener('click', initAudio);
-
     function onResults(results) {
-      // 1. Draw the Video Frame
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+      
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
       if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        for (const landmarks of results.multiHandLandmarks) {
-          const thumb = landmarks[4];
-          const index = landmarks[8];
+        const hand = results.multiHandLandmarks[0];
+        const thumb = hand[4];
+        const index = hand[8];
 
-          // Calculate Distance
-          const distance = Math.sqrt(Math.pow(thumb.x - index.x, 2) + Math.pow(thumb.y - index.y, 2));
-
-          // Handle Audio
-          if (audioStarted) {
-            const freq = Math.max(150, Math.min(1200, distance * 3500));
-            oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
-            gainNode.gain.setTargetAtTime(0.2, audioCtx.currentTime, 0.05);
-            statusDiv.innerText = `${Math.round(freq)} Hz`;
-          }
-
-          // 2. Visual Highlights
-          // Draw line between fingers
-          canvasCtx.beginPath();
-          canvasCtx.moveTo(thumb.x * canvasElement.width, thumb.y * canvasElement.height);
-          canvasCtx.lineTo(index.x * canvasElement.width, index.y * canvasElement.height);
-          canvasCtx.strokeStyle = "#00ffcc";
-          canvasCtx.lineWidth = 5;
-          canvasCtx.stroke();
-
-          // Draw Thumb Tip
-          canvasCtx.beginPath();
-          canvasCtx.arc(thumb.x * canvasElement.width, thumb.y * canvasElement.height, 12, 0, 2 * Math.PI);
-          canvasCtx.fillStyle = "#ff0077";
-          canvasCtx.fill();
-
-          // Draw Index Tip
-          canvasCtx.beginPath();
-          canvasCtx.arc(index.x * canvasElement.width, index.y * canvasElement.height, 12, 0, 2 * Math.PI);
-          canvasCtx.fillStyle = "#00ffcc";
-          canvasCtx.fill();
+        const dist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+        
+        if (audioCtx) {
+          const freq = 200 + (dist * 4000);
+          oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.03);
+          gainNode.gain.setTargetAtTime(0.1, audioCtx.currentTime, 0.03);
+          pitchDisp.innerText = Math.round(freq) + " Hz";
         }
+
+        // Visuals
+        canvasCtx.strokeStyle = "#0f0";
+        canvasCtx.lineWidth = 5;
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(thumb.x * canvasElement.width, thumb.y * canvasElement.height);
+        canvasCtx.lineTo(index.x * canvasElement.width, index.y * canvasElement.height);
+        canvasCtx.stroke();
       } else {
-        if (audioStarted) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
-        statusDiv.innerText = "Show your hand";
+        if(gainNode) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.03);
       }
       canvasCtx.restore();
     }
@@ -103,27 +88,18 @@
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
     });
 
-    hands.setOptions({
-      maxNumHands: 1,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.7
-    });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5 });
     hands.onResults(onResults);
 
     const camera = new Camera(videoElement, {
       onFrame: async () => { await hands.send({image: videoElement}); },
-      width: 1280,
-      height: 720
+      width: 1280, height: 720
     });
-    camera.start();
+
+    startBtn.addEventListener('click', () => {
+        initAudio();
+        camera.start().catch(err => alert("Camera error: " + err));
+    });
   </script>
 </body>
 </html>
-        };
-
-        init();
-    </script>
-</body>
-</html>
-

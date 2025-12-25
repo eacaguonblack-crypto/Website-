@@ -1,109 +1,158 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>COLOR SCALE ASCII</title>
+    <title>MAX DENSITY GPU</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        #output { width: 100vw; height: 100vh; object-fit: cover; font-family: 'Courier New', monospace; font-weight: bold; white-space: pre; background: #000; display: block; margin: 0; }
-        .ui { position: fixed; bottom: 20px; z-index: 10; display: flex; flex-direction: column; gap: 10px; align-items: center; }
-        .row { display: flex; gap: 10px; }
-        button { background: rgba(255, 255, 255, 0.2); color: #fff; border: 1px solid #fff; padding: 12px 20px; border-radius: 30px; font-family: monospace; font-size: 13px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-        video { display: none; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+        .ui { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 10; }
+        button { background: rgba(20,20,20,0.8); color: #fff; border: 1px solid #444; padding: 12px 20px; border-radius: 30px; font-family: monospace; font-size: 14px; backdrop-filter: blur(5px); }
     </style>
 </head>
 <body>
 
-    <pre id="output"></pre>
-    <video id="video" autoplay playsinline muted></video>
-
+    <canvas id="glCanvas"></canvas>
+    
     <div class="ui">
-        <div class="row">
-            <button id="toggle">CAM</button>
-            <button id="color-cycle">COLOR: FULL</button>
-        </div>
+        <button id="flipBtn">ROTATE</button>
+        <button id="modeBtn">FULL COLOR</button>
     </div>
 
-    <script>
-        const video = document.getElementById('video');
-        const output = document.getElementById('output');
-        const colorBtn = document.getElementById('color-cycle');
-        
-        const COLS = 180; // Optimized for stability with high density
-        const ASPECT_RATIO = 0.6; 
-        const ROWS = Math.floor(COLS * ASPECT_RATIO);
-        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+    <script type="text/javascript">
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
 
         let facingMode = "environment";
-        let colorMode = 0; // 0: Full, 1: Green, 2: Blue, 3: Grayscale
-        const modes = ["FULL", "GREEN", "BLUE", "GRAY"];
+        let colorMode = 0; // 0: Full, 1: Green, 2: Blue, 3: Gray
+        const modes = ["FULL COLOR", "MATRIX GREEN", "DEEP BLUE", "GRAYSCALE"];
 
-        const tempCanvas = document.createElement('canvas');
-        const tCtx = tempCanvas.getContext('2d', { alpha: false });
+        // High Density Settings
+        const COLS = 300.0; 
+        const ROWS = 200.0;
 
-        async function init() {
-            if (window.stream) window.stream.getTracks().forEach(t => t.stop());
-            try {
-                const s = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: facingMode, width: { ideal: 640 } }
-                });
-                window.stream = s;
-                video.srcObject = s;
-            } catch (e) { alert("Camera Access Error"); }
-        }
-
-        function update() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                tempCanvas.width = COLS;
-                tempCanvas.height = ROWS;
-                tCtx.drawImage(video, 0, 0, COLS, ROWS);
-                const pixels = tCtx.getImageData(0, 0, COLS, ROWS).data;
-                
-                let asciiFrame = "";
-                for (let y = 0; y < ROWS; y++) {
-                    for (let x = 0; x < COLS; x++) {
-                        const i = (y * COLS + x) * 4;
-                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                        const avg = (r + g + b) / 3;
-                        const char = CHARS[Math.floor((avg / 255) * (CHARS.length - 1))];
-                        
-                        let finalColor;
-                        if (colorMode === 0) finalColor = `rgb(${r},${g},${b})`;
-                        else if (colorMode === 1) finalColor = `rgb(0,${avg},0)`; // Matrix Green
-                        else if (colorMode === 2) finalColor = `rgb(0,${Math.floor(avg/2)},${avg})`; // Deep Blue
-                        else finalColor = `rgb(${avg},${avg},${avg})`; // Grayscale
-
-                        asciiFrame += `<span style="color:${finalColor}">${char}</span>`;
-                    }
-                    asciiFrame += "\n";
-                }
-                output.innerHTML = asciiFrame;
+        // Vertex Shader
+        const vsSource = `
+            attribute vec4 aVertexPosition;
+            varying vec2 vTexCoord;
+            void main() {
+                gl_Position = aVertexPosition;
+                vTexCoord = (aVertexPosition.xy + 1.0) / 2.0;
             }
-            requestAnimationFrame(update);
+        `;
+
+        // Fragment Shader (The magic happens here)
+        const fsSource = `
+            precision mediump float;
+            varying vec2 vTexCoord;
+            uniform sampler2D uSampler;
+            uniform float uCols;
+            uniform float uRows;
+            uniform int uColorMode;
+
+            float character(float n, vec2 p) {
+                p = floor(p * vec2(4.0, -4.0) + 0.5);
+                if (clamp(p.x, 0.0, 3.0) == p.x && clamp(p.y, 0.0, 4.0) == p.y) {
+                    if (int(mod(n / pow(2.0, p.y * 4.0 + p.x), 2.0)) == 1) return 1.0;
+                }
+                return 0.0;
+            }
+
+            void main() {
+                vec2 uv = vTexCoord;
+                // Flip texture correctly for environment/user
+                vec2 grid = vec2(uCols, uRows);
+                vec2 p = floor(uv * grid) / grid;
+                vec4 col = texture2D(uSampler, vec2(p.x, 1.0 - p.y));
+                
+                float gray = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
+                
+                // Color modes
+                vec3 finalCol;
+                if (uColorMode == 0) finalCol = col.rgb;
+                else if (uColorMode == 1) finalCol = vec3(0.0, gray, 0.0);
+                else if (uColorMode == 2) finalCol = vec3(0.0, gray * 0.5, gray);
+                else finalCol = vec3(gray);
+
+                // Simple ASCII threshold effect
+                float charMask = step(0.5, gray); 
+                gl_FragColor = vec4(finalCol * charMask, 1.0);
+            }
+        `;
+
+        // Initialize WebGL and Camera
+        let video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+
+        async function startCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: facingMode } 
+            });
+            video.srcObject = stream;
+            video.play();
         }
 
-        function adjustLayout() {
-            const fontSize = window.innerWidth / COLS * 1.7;
-            output.style.fontSize = fontSize + "px";
-            output.style.lineHeight = (fontSize * 0.85) + "px";
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
         }
 
-        colorBtn.onclick = () => {
+        const program = gl.createProgram();
+        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const posBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,1, 1,1, -1,-1, 1,-1]), gl.STATIC_DRAW);
+
+        const posAttrib = gl.getAttribLocation(program, "aVertexPosition");
+        gl.enableVertexAttribArray(posAttrib);
+        gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+        const uCols = gl.getUniformLocation(program, "uCols");
+        const uRows = gl.getUniformLocation(program, "uRows");
+        const uMode = gl.getUniformLocation(program, "uColorMode");
+
+        function draw() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+            
+            gl.uniform1f(uCols, COLS);
+            gl.uniform1f(uRows, ROWS);
+            gl.uniform1i(uMode, colorMode);
+
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            requestAnimationFrame(draw);
+        }
+
+        document.getElementById('flipBtn').onclick = () => {
+            facingMode = facingMode === "environment" ? "user" : "environment";
+            startCamera();
+        };
+
+        document.getElementById('modeBtn').onclick = () => {
             colorMode = (colorMode + 1) % modes.length;
-            colorBtn.innerText = "COLOR: " + modes[colorMode];
+            document.getElementById('modeBtn').innerText = modes[colorMode];
         };
 
-        document.getElementById('toggle').onclick = () => {
-            facingMode = (facingMode === "user") ? "environment" : "user";
-            init();
-        };
-
-        window.addEventListener('resize', adjustLayout);
-        video.onloadedmetadata = () => { adjustLayout(); update(); };
-
-        init();
+        startCamera().then(() => requestAnimationFrame(draw));
     </script>
 </body>
 </html>
-

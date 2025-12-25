@@ -1,46 +1,15 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>HD ASCII CAM</title>
+    <title>ASCII CAM</title>
     <style>
-        body { 
-            margin: 0; 
-            background: #000; 
-            color: #fff; 
-            font-family: 'Courier New', monospace; 
-            overflow: hidden; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            height: 100vh; 
-        }
-        #ascii-container { 
-            line-height: 6px; 
-            font-size: 6px; 
-            white-space: pre; 
-            letter-spacing: 1px;
-            margin-top: 10px;
-        }
-        .controls { 
-            position: fixed; 
-            bottom: 30px; 
-            display: flex; 
-            gap: 10px; 
-            z-index: 10; 
-            background: rgba(0,0,0,0.7);
-            padding: 15px;
-            border-radius: 50px;
-        }
-        button { 
-            background: #333; 
-            color: white; 
-            border: 1px solid #555; 
-            padding: 12px 20px; 
-            border-radius: 25px; 
-            font-size: 14px;
-        }
+        body { margin: 0; background: #000; color: #0f0; font-family: monospace; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #ascii-container { line-height: 7px; font-size: 7px; white-space: pre; cursor: default; }
+        .controls { position: fixed; bottom: 20px; z-index: 10; }
+        button { background: rgba(255,255,255,0.2); color: white; border: 1px solid white; padding: 10px 20px; border-radius: 5px; font-family: monospace; }
         video, canvas { display: none; }
     </style>
 </head>
@@ -49,8 +18,7 @@
     <div id="ascii-container"></div>
     
     <div class="controls">
-        <button id="switch-btn">🔄 Flip</button>
-        <button id="density-btn">Toggle Detail</button>
+        <button id="switch-btn">Switch Camera</button>
     </div>
 
     <video id="video" autoplay playsinline></video>
@@ -62,15 +30,10 @@
         const context = canvas.getContext('2d', { willReadFrequently: true });
         const asciiContainer = document.getElementById('ascii-container');
         const switchBtn = document.getElementById('switch-btn');
-        const densityBtn = document.getElementById('density-btn');
 
-        // Extended character sets
-        const simpleChars = "@%#*+=-:. ";
-        const complexChars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
-        
-        let chars = complexChars;
-        const width = 70; 
-        const height = 50;
+        const chars = "@%#*+=-:. ";
+        const width = 60; // Slightly smaller for better mobile speed
+        const height = 45;
         let currentFacingMode = "user";
 
         async function initCamera() {
@@ -84,17 +47,13 @@
                 });
                 video.srcObject = stream;
             } catch (err) {
-                asciiContainer.innerHTML = "Camera Error: " + err.message;
+                asciiContainer.innerHTML = "Error: " + err.message;
             }
         }
 
         switchBtn.addEventListener('click', () => {
             currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
             initCamera();
-        });
-
-        densityBtn.addEventListener('click', () => {
-            chars = chars.length > 15 ? simpleChars : complexChars;
         });
 
         function render() {
@@ -109,54 +68,13 @@
                     for (let x = 0; x < width; x++) {
                         const i = (y * width + x) * 4;
                         const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                        
-                        // Perceptual brightness
-                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
-                        
-                        // Map brightness to character index
-                        const charIndex = Math.floor((brightness / 256) * chars.length);
-                        const char = chars[charIndex] || " ";
-                        
+                        const brightness = (0.21*r + 0.71*g + 0.07*b);
+                        const char = chars[Math.floor((brightness/255) * (chars.length-1))];
                         html += `<span style="color:rgb(${r},${g},${b})">${char}</span>`;
                     }
                     html += "\n";
                 }
                 asciiContainer.innerHTML = html;
-            }
-            requestAnimationFrame(render);
-        }
-
-        video.addEventListener('play', () => requestAnimationFrame(render));
-        initCamera();
-    </script>
-</body>
-</html>
-                }
-                hCtx.drawImage(video, 0, 0, width, height);
-                hCtx.restore();
-
-                const pixels = hCtx.getImageData(0, 0, width, height).data;
-
-                // 2. Prepare Output Canvas
-                outputCanvas.width = width * charWidth;
-                outputCanvas.height = height * charHeight;
-                oCtx.fillStyle = "black";
-                oCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
-                oCtx.font = `${charHeight}px monospace`;
-
-                // 3. Draw ASCII
-                for (let y = 0; y < height; y++) {
-                    for (let x = 0; x < width; x++) {
-                        const i = (y * width + x) * 4;
-                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
-                        const charIndex = Math.floor((brightness / 256) * chars.length);
-                        const char = chars[charIndex] || " ";
-
-                        oCtx.fillStyle = `rgb(${r},${g},${b})`;
-                        oCtx.fillText(char, x * charWidth, y * charHeight);
-                    }
-                }
             }
             requestAnimationFrame(render);
         }

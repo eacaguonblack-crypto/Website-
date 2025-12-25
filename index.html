@@ -3,126 +3,136 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Wide Range ASCII</title>
+    <title>400x300 ASCII PRO</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        canvas { width: 100vw; height: 100vh; object-fit: cover; background: #000; }
-        .controls { position: fixed; bottom: 30px; z-index: 100; display: flex; gap: 10px; }
-        button { background: rgba(30, 30, 30, 0.9); color: #fff; border: 1px solid #555; padding: 15px 20px; border-radius: 30px; font-family: monospace; font-size: 14px; }
-        video { display: none; }
+        body { 
+            margin: 0; 
+            background: #000; 
+            overflow: hidden; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh;
+        }
+        /* We use a visible canvas now for high performance */
+        #output-canvas {
+            width: 100vw;
+            height: auto;
+            image-rendering: pixelated;
+        }
+        .controls { 
+            position: fixed; 
+            bottom: 20px; 
+            z-index: 10; 
+            background: rgba(0,0,0,0.8);
+            padding: 10px 20px;
+            border-radius: 30px;
+            display: flex;
+            gap: 15px;
+        }
+        button { 
+            background: #444; 
+            color: white; 
+            border: 1px solid #666; 
+            padding: 8px 15px; 
+            border-radius: 20px; 
+            font-family: monospace;
+        }
+        video, #hidden-canvas { display: none; }
     </style>
 </head>
 <body>
 
-    <canvas id="output"></canvas>
-    <video id="video" autoplay playsinline muted></video>
-
+    <canvas id="output-canvas"></canvas>
+    
     <div class="controls">
-        <button id="flip">🔄 ROTATE</button>
-        <button id="color">MODE: FULL</button>
+        <button id="switch-btn">Flip Camera</button>
+        <div style="color: #0f0; font-family: monospace; font-size: 12px; align-self: center;">400 x 300</div>
     </div>
+
+    <video id="video" autoplay playsinline></video>
+    <canvas id="hidden-canvas"></canvas>
 
     <script>
         const video = document.getElementById('video');
-        const canvas = document.getElementById('output');
-        const ctx = canvas.getContext('2d', { alpha: false });
+        const hiddenCanvas = document.getElementById('hidden-canvas');
+        const outputCanvas = document.getElementById('output-canvas');
+        const hCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
+        const oCtx = outputCanvas.getContext('2d');
 
-        // Widest character range for smooth gradients
-        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        const chars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
         
-        // High density settings
-        const COLS = 180; 
-        const ROWS = 140; 
-        
-        let facingMode = "environment"; 
-        let colorMode = 0; 
-        const modes = ["FULL", "GREEN", "BLUE", "GRAY"];
+        // --- Rectangular 400x300 Settings ---
+        const width = 400; 
+        const height = 300;
+        const charWidth = 6;  // Size of each character in pixels
+        const charHeight = 8;
+        // ------------------------------------
 
-        async function startCamera() {
-            if (window.stream) {
-                window.stream.getTracks().forEach(track => track.stop());
-                video.srcObject = null;
+        let currentFacingMode = "user";
+
+        async function initCamera() {
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
             }
-
-            // Short delay helps mobile hardware switch tracks without hanging
-            await new Promise(resolve => setTimeout(resolve, 250));
-
             try {
-                const constraints = {
-                    video: { 
-                        facingMode: facingMode,
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    }
-                };
-                const s = await navigator.mediaDevices.getUserMedia(constraints);
-                window.stream = s;
-                video.srcObject = s;
-                video.play();
-            } catch (e) {
-                alert("Camera error. Please ensure HTTPS and permissions.");
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: currentFacingMode }, 
+                    audio: false 
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                alert("Camera Error: " + err.message);
             }
         }
 
+        switchBtn.addEventListener('click', () => {
+            currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+            initCamera();
+        });
+
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = window.innerWidth;
-                canvas.height = window.innerHeight;
-
-                const cellW = canvas.width / COLS;
-                const cellH = canvas.height / ROWS;
-
-                // Sampling canvas
-                const off = document.createElement('canvas');
-                off.width = COLS;
-                offscreenHeight = ROWS;
-                const oCtx = off.getContext('2d');
+                // 1. Process Video in background
+                hiddenCanvas.width = width;
+                hiddenCanvas.height = height;
                 
-                if (facingMode === "user") {
-                    oCtx.translate(COLS, 0);
-                    oCtx.scale(-1, 1);
+                hCtx.save();
+                if (currentFacingMode === "user") {
+                    hCtx.translate(width, 0);
+                    hCtx.scale(-1, 1);
                 }
-                oCtx.drawImage(video, 0, 0, COLS, ROWS);
-                const pixels = oCtx.getImageData(0, 0, COLS, ROWS).data;
+                hCtx.drawImage(video, 0, 0, width, height);
+                hCtx.restore();
 
-                ctx.fillStyle = "black";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.font = `${cellH}px monospace`;
-                ctx.textAlign = "center";
+                const pixels = hCtx.getImageData(0, 0, width, height).data;
 
-                for (let y = 0; y < ROWS; y++) {
-                    for (let x = 0; x < COLS; x++) {
-                        const i = (y * COLS + x) * 4;
+                // 2. Prepare Output Canvas
+                outputCanvas.width = width * charWidth;
+                outputCanvas.height = height * charHeight;
+                oCtx.fillStyle = "black";
+                oCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+                oCtx.font = `${charHeight}px monospace`;
+
+                // 3. Draw ASCII
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const i = (y * width + x) * 4;
                         const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
                         const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
-                        
-                        // Map 0-255 brightness to the 70-character array
-                        const charIdx = Math.floor((brightness / 256) * CHARS.length);
-                        const char = CHARS[charIdx];
+                        const charIndex = Math.floor((brightness / 256) * chars.length);
+                        const char = chars[charIndex] || " ";
 
-                        if (colorMode === 0) ctx.fillStyle = `rgb(${r},${g},${b})`;
-                        else if (colorMode === 1) ctx.fillStyle = `rgb(0,${brightness},0)`;
-                        else if (colorMode === 2) ctx.fillStyle = `rgb(0,${brightness/2},${brightness})`;
-                        else ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
-
-                        ctx.fillText(char, x * cellW + cellW/2, y * cellH + cellH);
+                        oCtx.fillStyle = `rgb(${r},${g},${b})`;
+                        oCtx.fillText(char, x * charWidth, y * charHeight);
                     }
                 }
             }
             requestAnimationFrame(render);
         }
 
-        document.getElementById('flip').onclick = async () => {
-            facingMode = (facingMode === "user") ? "environment" : "user";
-            await startCamera();
-        };
-
-        document.getElementById('color').onclick = () => {
-            colorMode = (colorMode + 1) % modes.length;
-            document.getElementById('color').innerText = "MODE: " + modes[colorMode];
-        };
-
-        startCamera().then(() => requestAnimationFrame(render));
+        video.addEventListener('play', () => requestAnimationFrame(render));
+        initCamera();
     </script>
 </body>
 </html>

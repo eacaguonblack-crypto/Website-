@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ASCII PRO 400x300</title>
+    <title>MAX DENSITY ASCII</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        canvas { width: 100vw; height: auto; background: #000; }
-        .controls { position: fixed; bottom: 20px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 50px; }
-        button { background: #333; color: #0f0; border: 1px solid #0f0; padding: 10px 20px; border-radius: 20px; font-family: monospace; font-weight: bold; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { width: 100%; height: 100%; object-fit: cover; }
+        .ui { position: fixed; bottom: 20px; z-index: 10; display: flex; gap: 10px; }
+        button { background: rgba(0,255,0,0.2); color: #0f0; border: 1px solid #0f0; padding: 12px 20px; border-radius: 30px; font-family: monospace; font-size: 14px; backdrop-filter: blur(5px); }
         video { display: none; }
     </style>
 </head>
@@ -17,8 +17,8 @@
     <canvas id="output"></canvas>
     <video id="video" autoplay playsinline muted></video>
 
-    <div class="controls">
-        <button id="toggle">FLIP CAMERA</button>
+    <div class="ui">
+        <button id="toggle">SWITCH CAMERA</button>
     </div>
 
     <script>
@@ -26,71 +26,64 @@
         const canvas = document.getElementById('output');
         const ctx = canvas.getContext('2d', { alpha: false });
 
-        // Your requested 400x300 Rectangular Resolution
-        const COLS = 400; 
-        const ROWS = 300;
+        // High Density Character Set
         const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
         
-        let facingMode = "environment"; // Starts with BACK camera
+        // Increase these for even more "pixels" (Warning: Higher = Laggier)
+        const COLS = 400; 
+        const ROWS = 300; 
+
+        let facingMode = "environment"; 
 
         async function setupCamera() {
-            if (window.stream) {
-                window.stream.getTracks().forEach(track => track.stop());
-            }
-
-            const constraints = {
-                video: { 
-                    facingMode: facingMode,
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                }
-            };
-
+            if (window.stream) window.stream.getTracks().forEach(t => t.stop());
             try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                window.stream = stream;
-                video.srcObject = stream;
-            } catch (e) {
-                alert("Please allow camera access and ensure you are using HTTPS.");
-            }
+                const s = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode, width: 1280, height: 720 }
+                });
+                window.stream = s;
+                video.srcObject = s;
+            } catch (e) { alert("Camera Error. Use HTTPS."); }
         }
 
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // Set canvas size for the text grid
-                const charW = 10;
-                const charH = 12;
-                canvas.width = COLS * charW;
-                canvas.height = ROWS * charH;
+                // Set internal resolution to fit the screen 1:1 with high density
+                const dpr = window.devicePixelRatio || 1;
+                canvas.width = window.innerWidth * dpr;
+                canvas.height = window.innerHeight * dpr;
 
-                // Create a temporary canvas to get image data
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = COLS;
-                tempCanvas.height = ROWS;
-                const tempCtx = tempCanvas.getContext('2d');
+                const cellW = canvas.width / COLS;
+                const cellH = canvas.height / ROWS;
+
+                // Hidden processing canvas
+                const proc = document.createElement('canvas');
+                proc.width = COLS;
+                proc.height = ROWS;
+                const pCtx = proc.getContext('2d');
                 
-                // Draw video to temp canvas
-                tempCtx.drawImage(video, 0, 0, COLS, ROWS);
-                const data = tempCtx.getImageData(0, 0, COLS, ROWS).data;
+                // Flip if selfie
+                if (facingMode === "user") {
+                    pCtx.translate(COLS, 0);
+                    pCtx.scale(-1, 1);
+                }
+                pCtx.drawImage(video, 0, 0, COLS, ROWS);
+                const data = pCtx.getImageData(0, 0, COLS, ROWS).data;
 
-                // Clear main canvas
                 ctx.fillStyle = "black";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.font = `${charH}px monospace`;
+                ctx.font = `bold ${cellH}px monospace`;
+                ctx.textAlign = "center";
 
                 for (let y = 0; y < ROWS; y++) {
                     for (let x = 0; x < COLS; x++) {
                         const i = (y * COLS + x) * 4;
-                        const r = data[i];
-                        const g = data[i+1];
-                        const b = data[i+2];
-
-                        const brightness = (r + g + b) / 3;
-                        const charIdx = Math.floor((brightness / 255) * (CHARS.length - 1));
-                        const char = CHARS[charIdx];
+                        const r = data[i], g = data[i+1], b = data[i+2];
+                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+                        const char = CHARS[Math.floor((brightness / 256) * CHARS.length)];
 
                         ctx.fillStyle = `rgb(${r},${g},${b})`;
-                        ctx.fillText(char, x * charW, y * charH);
+                        ctx.fillText(char, x * cellW + cellW/2, y * cellH + cellH);
                     }
                 }
             }
@@ -98,10 +91,20 @@
         }
 
         document.getElementById('toggle').onclick = () => {
-            facingMode = facingMode === "user" ? "environment" : "user";
+            facingMode = (facingMode === "user") ? "environment" : "user";
             setupCamera();
         };
 
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        setupCamera();
+        video.onloadedmetadata = () => render();
+    </script>
+</body>
+</html>
         video.onloadedmetadata = () => {
             render();
         };

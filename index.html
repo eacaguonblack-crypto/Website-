@@ -3,106 +3,108 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>COLOR SCALE ASCII</title>
+    <title>ULTRA DENSITY ASCII</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        #output { width: 100vw; height: 100vh; object-fit: cover; font-family: 'Courier New', monospace; font-weight: bold; white-space: pre; background: #000; display: block; margin: 0; }
-        .ui { position: fixed; bottom: 20px; z-index: 10; display: flex; flex-direction: column; gap: 10px; align-items: center; }
-        .row { display: flex; gap: 10px; }
-        button { background: rgba(255, 255, 255, 0.2); color: #fff; border: 1px solid #fff; padding: 12px 20px; border-radius: 30px; font-family: monospace; font-size: 13px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        canvas { width: 100vw; height: 100vh; object-fit: cover; image-rendering: pixelated; }
+        .ui { position: fixed; bottom: 25px; z-index: 10; display: flex; gap: 10px; }
+        button { background: rgba(0,0,0,0.7); color: #fff; border: 1px solid #444; padding: 12px 18px; border-radius: 25px; font-family: monospace; font-size: 14px; backdrop-filter: blur(10px); }
         video { display: none; }
     </style>
 </head>
 <body>
 
-    <pre id="output"></pre>
+    <canvas id="output"></canvas>
     <video id="video" autoplay playsinline muted></video>
 
     <div class="ui">
-        <div class="row">
-            <button id="toggle">CAM</button>
-            <button id="color-cycle">COLOR: FULL</button>
-        </div>
+        <button id="toggle">CAM</button>
+        <button id="mode">SCALE: FULL</button>
     </div>
 
     <script>
         const video = document.getElementById('video');
-        const output = document.getElementById('output');
-        const colorBtn = document.getElementById('color-cycle');
-        
-        const COLS = 180; // Optimized for stability with high density
-        const ASPECT_RATIO = 0.6; 
-        const ROWS = Math.floor(COLS * ASPECT_RATIO);
+        const canvas = document.getElementById('output');
+        const ctx = canvas.getContext('2d', { alpha: false });
+
+        // DENSITY SETTINGS: 250 characters wide is the "Smooth Max" for mobile
+        const COLS = 250; 
+        const ROWS = Math.floor(COLS * (window.innerHeight / window.innerWidth));
         const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
 
-        let facingMode = "environment";
-        let colorMode = 0; // 0: Full, 1: Green, 2: Blue, 3: Grayscale
-        const modes = ["FULL", "GREEN", "BLUE", "GRAY"];
+        let facingMode = "environment"; 
+        let colorMode = 0; // 0: Full, 1: Green, 2: Blue, 3: Gray, 4: Amber
+        const modes = ["FULL", "GREEN", "BLUE", "GRAY", "AMBER"];
 
-        const tempCanvas = document.createElement('canvas');
-        const tCtx = tempCanvas.getContext('2d', { alpha: false });
+        const procCanvas = document.createElement('canvas');
+        const pCtx = procCanvas.getContext('2d');
 
-        async function init() {
+        async function initCamera() {
             if (window.stream) window.stream.getTracks().forEach(t => t.stop());
             try {
                 const s = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: facingMode, width: { ideal: 640 } }
+                    video: { facingMode: facingMode, width: { ideal: 1024 }, height: { ideal: 768 } }
                 });
                 window.stream = s;
                 video.srcObject = s;
-            } catch (e) { alert("Camera Access Error"); }
+            } catch (e) { alert("Camera access required via HTTPS"); }
         }
 
-        function update() {
+        function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                tempCanvas.width = COLS;
-                tempCanvas.height = ROWS;
-                tCtx.drawImage(video, 0, 0, COLS, ROWS);
-                const pixels = tCtx.getImageData(0, 0, COLS, ROWS).data;
+                const dpr = window.devicePixelRatio || 1;
+                canvas.width = window.innerWidth * dpr;
+                canvas.height = window.innerHeight * dpr;
+
+                procCanvas.width = COLS;
+                procCanvas.height = ROWS;
+
+                // Capture Frame
+                pCtx.drawImage(video, 0, 0, COLS, ROWS);
+                const data = pCtx.getImageData(0, 0, COLS, ROWS).data;
+
+                // Prepare Output
+                ctx.fillStyle = "black";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
                 
-                let asciiFrame = "";
+                const charW = canvas.width / COLS;
+                const charH = canvas.height / ROWS;
+                ctx.font = `${charH}px monospace`;
+                ctx.textAlign = "center";
+
                 for (let y = 0; y < ROWS; y++) {
                     for (let x = 0; x < COLS; x++) {
                         const i = (y * COLS + x) * 4;
-                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                        const avg = (r + g + b) / 3;
-                        const char = CHARS[Math.floor((avg / 255) * (CHARS.length - 1))];
-                        
-                        let finalColor;
-                        if (colorMode === 0) finalColor = `rgb(${r},${g},${b})`;
-                        else if (colorMode === 1) finalColor = `rgb(0,${avg},0)`; // Matrix Green
-                        else if (colorMode === 2) finalColor = `rgb(0,${Math.floor(avg/2)},${avg})`; // Deep Blue
-                        else finalColor = `rgb(${avg},${avg},${avg})`; // Grayscale
+                        const r = data[i], g = data[i+1], b = data[i+2];
+                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+                        const char = CHARS[Math.floor((brightness / 256) * CHARS.length)];
 
-                        asciiFrame += `<span style="color:${finalColor}">${char}</span>`;
+                        // Apply Color Scale
+                        if (colorMode === 0) ctx.fillStyle = `rgb(${r},${g},${b})`;
+                        else if (colorMode === 1) ctx.fillStyle = `rgb(0,${brightness},0)`;
+                        else if (colorMode === 2) ctx.fillStyle = `rgb(0,${brightness/2},${brightness})`;
+                        else if (colorMode === 3) ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+                        else if (colorMode === 4) ctx.fillStyle = `rgb(${brightness},${brightness*0.6},0)`;
+
+                        ctx.fillText(char, x * charW + charW/2, y * charH + charH * 0.8);
                     }
-                    asciiFrame += "\n";
                 }
-                output.innerHTML = asciiFrame;
             }
-            requestAnimationFrame(update);
+            requestAnimationFrame(render);
         }
 
-        function adjustLayout() {
-            const fontSize = window.innerWidth / COLS * 1.7;
-            output.style.fontSize = fontSize + "px";
-            output.style.lineHeight = (fontSize * 0.85) + "px";
-        }
-
-        colorBtn.onclick = () => {
+        document.getElementById('mode').onclick = () => {
             colorMode = (colorMode + 1) % modes.length;
-            colorBtn.innerText = "COLOR: " + modes[colorMode];
+            document.getElementById('mode').innerText = "SCALE: " + modes[colorMode];
         };
 
         document.getElementById('toggle').onclick = () => {
             facingMode = (facingMode === "user") ? "environment" : "user";
-            init();
+            initCamera();
         };
 
-        window.addEventListener('resize', adjustLayout);
-        video.onloadedmetadata = () => { adjustLayout(); update(); };
-
-        init();
+        initCamera();
+        video.onloadedmetadata = () => render();
     </script>
 </body>
 </html>

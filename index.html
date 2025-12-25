@@ -1,89 +1,139 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GPU ASCII CAM</title>
+    <title>400x300 ASCII PRO</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: monospace; }
-        canvas { width: 100vw; height: auto; image-rendering: pixelated; }
-        .ui { position: fixed; bottom: 20px; background: rgba(0,0,0,0.8); color: #0f0; padding: 15px; border-radius: 20px; z-index: 10; text-align: center; }
-        button { background: #222; color: #0f0; border: 1px solid #0f0; padding: 10px 20px; border-radius: 10px; margin-top: 10px; }
+        body { 
+            margin: 0; 
+            background: #000; 
+            overflow: hidden; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh;
+        }
+        /* We use a visible canvas now for high performance */
+        #output-canvas {
+            width: 100vw;
+            height: auto;
+            image-rendering: pixelated;
+        }
+        .controls { 
+            position: fixed; 
+            bottom: 20px; 
+            z-index: 10; 
+            background: rgba(0,0,0,0.8);
+            padding: 10px 20px;
+            border-radius: 30px;
+            display: flex;
+            gap: 15px;
+        }
+        button { 
+            background: #444; 
+            color: white; 
+            border: 1px solid #666; 
+            padding: 8px 15px; 
+            border-radius: 20px; 
+            font-family: monospace;
+        }
+        video, #hidden-canvas { display: none; }
     </style>
 </head>
 <body>
 
-    <canvas id="output"></canvas>
+    <canvas id="output-canvas"></canvas>
     
-    <div class="ui">
-        <div>Resolution: 400 x 300</div>
-        <button id="flip">Switch Camera</button>
+    <div class="controls">
+        <button id="switch-btn">Flip Camera</button>
+        <div style="color: #0f0; font-family: monospace; font-size: 12px; align-self: center;">400 x 300</div>
     </div>
 
-    <script type="module">
-        // Using a tiny library for WebGL ASCII to ensure 400x300 works on mobile
-        import { AsciiEffect } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/effects/AsciiEffect.js';
-        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+    <video id="video" autoplay playsinline></video>
+    <canvas id="hidden-canvas"></canvas>
 
-        const flipBtn = document.getElementById('flip');
-        let currentFacingMode = "environment";
-        let scene, camera, renderer, effect, video, texture;
+    <script>
+        const video = document.getElementById('video');
+        const hiddenCanvas = document.getElementById('hidden-canvas');
+        const outputCanvas = document.getElementById('output-canvas');
+        const hCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
+        const oCtx = outputCanvas.getContext('2d');
 
-        async function init() {
-            // 1. Setup Video
-            video = document.createElement('video');
-            video.autoplay = true;
-            video.playsInline = true;
-            
+        const chars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        
+        // --- Rectangular 400x300 Settings ---
+        const width = 400; 
+        const height = 300;
+        const charWidth = 6;  // Size of each character in pixels
+        const charHeight = 8;
+        // ------------------------------------
+
+        let currentFacingMode = "user";
+
+        async function initCamera() {
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: currentFacingMode } 
+                    video: { facingMode: currentFacingMode }, 
+                    audio: false 
                 });
                 video.srcObject = stream;
-                video.play();
-            } catch (e) { alert("Camera Error: " + e.message); }
-
-            // 2. Setup Three.js Scene
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(70, 400/300, 0.1, 1000);
-            camera.position.z = 5;
-
-            renderer = new THREE.WebGLRenderer({ antialias: false });
-            renderer.setSize(400, 300);
-
-            // 3. Create ASCII Effect (Characters: $@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,"^`'. )
-            effect = new AsciiEffect(renderer, ' .:-=+*#%@', { invert: true, color: true });
-            effect.setSize(window.innerWidth, window.innerHeight);
-            document.body.replaceChild(effect.domElement, document.getElementById('output'));
-
-            // 4. Video Texture
-            texture = new THREE.VideoTexture(video);
-            const geometry = new THREE.PlaneGeometry(16, 12);
-            const material = new THREE.MeshBasicMaterial({ map: texture });
-            const mesh = new THREE.Mesh(geometry, material);
-            
-            // Mirroring logic
-            if (currentFacingMode === "user") mesh.scale.x = -1;
-            
-            scene.add(mesh);
-
-            animate();
+            } catch (err) {
+                alert("Camera Error: " + err.message);
+            }
         }
 
-        function animate() {
-            requestAnimationFrame(animate);
-            effect.render(scene, camera);
+        switchBtn.addEventListener('click', () => {
+            currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+            initCamera();
+        });
+
+        function render() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                // 1. Process Video in background
+                hiddenCanvas.width = width;
+                hiddenCanvas.height = height;
+                
+                hCtx.save();
+                if (currentFacingMode === "user") {
+                    hCtx.translate(width, 0);
+                    hCtx.scale(-1, 1);
+                }
+                hCtx.drawImage(video, 0, 0, width, height);
+                hCtx.restore();
+
+                const pixels = hCtx.getImageData(0, 0, width, height).data;
+
+                // 2. Prepare Output Canvas
+                outputCanvas.width = width * charWidth;
+                outputCanvas.height = height * charHeight;
+                oCtx.fillStyle = "black";
+                oCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+                oCtx.font = `${charHeight}px monospace`;
+
+                // 3. Draw ASCII
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const i = (y * width + x) * 4;
+                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+                        const charIndex = Math.floor((brightness / 256) * chars.length);
+                        const char = chars[charIndex] || " ";
+
+                        oCtx.fillStyle = `rgb(${r},${g},${b})`;
+                        oCtx.fillText(char, x * charWidth, y * charHeight);
+                    }
+                }
+            }
+            requestAnimationFrame(render);
         }
 
-        flipBtn.onclick = () => {
-            currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
-            location.reload(); // Quickest way to reset the stream and flip
-        };
-
-        window.onresize = () => effect.setSize(window.innerWidth, window.innerHeight);
-
-        init();
+        video.addEventListener('play', () => requestAnimationFrame(render));
+        initCamera();
     </script>
 </body>
 </html>
-

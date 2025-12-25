@@ -1,86 +1,113 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ASCII CAM</title>
+    <title>ASCII PRO 400x300</title>
     <style>
-        body { margin: 0; background: #000; color: #0f0; font-family: monospace; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        #ascii-container { line-height: 7px; font-size: 7px; white-space: pre; cursor: default; }
-        .controls { position: fixed; bottom: 20px; z-index: 10; }
-        button { background: rgba(255,255,255,0.2); color: white; border: 1px solid white; padding: 10px 20px; border-radius: 5px; font-family: monospace; }
-        video, canvas { display: none; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        canvas { width: 100vw; height: auto; background: #000; }
+        .controls { position: fixed; bottom: 20px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 50px; }
+        button { background: #333; color: #0f0; border: 1px solid #0f0; padding: 10px 20px; border-radius: 20px; font-family: monospace; font-weight: bold; }
+        video { display: none; }
     </style>
 </head>
 <body>
 
-    <div id="ascii-container"></div>
-    
-    <div class="controls">
-        <button id="switch-btn">Switch Camera</button>
-    </div>
+    <canvas id="output"></canvas>
+    <video id="video" autoplay playsinline muted></video>
 
-    <video id="video" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
+    <div class="controls">
+        <button id="toggle">FLIP CAMERA</button>
+    </div>
 
     <script>
         const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        const asciiContainer = document.getElementById('ascii-container');
-        const switchBtn = document.getElementById('switch-btn');
+        const canvas = document.getElementById('output');
+        const ctx = canvas.getContext('2d', { alpha: false });
 
-        const chars = "@%#*+=-:. ";
-        const width = 60; // Slightly smaller for better mobile speed
-        const height = 45;
-        let currentFacingMode = "user";
+        // Your requested 400x300 Rectangular Resolution
+        const COLS = 400; 
+        const ROWS = 300;
+        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        
+        let facingMode = "environment"; // Starts with BACK camera
 
-        async function initCamera() {
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
+        async function setupCamera() {
+            if (window.stream) {
+                window.stream.getTracks().forEach(track => track.stop());
             }
+
+            const constraints = {
+                video: { 
+                    facingMode: facingMode,
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                }
+            };
+
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: currentFacingMode }, 
-                    audio: false 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                window.stream = stream;
                 video.srcObject = stream;
-            } catch (err) {
-                asciiContainer.innerHTML = "Error: " + err.message;
+            } catch (e) {
+                alert("Please allow camera access and ensure you are using HTTPS.");
             }
         }
 
-        switchBtn.addEventListener('click', () => {
-            currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
-            initCamera();
-        });
-
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = width;
-                canvas.height = height;
-                context.drawImage(video, 0, 0, width, height);
-                const pixels = context.getImageData(0, 0, width, height).data;
-                let html = "";
+                // Set canvas size for the text grid
+                const charW = 10;
+                const charH = 12;
+                canvas.width = COLS * charW;
+                canvas.height = ROWS * charH;
 
-                for (let y = 0; y < height; y++) {
-                    for (let x = 0; x < width; x++) {
-                        const i = (y * width + x) * 4;
-                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                        const brightness = (0.21*r + 0.71*g + 0.07*b);
-                        const char = chars[Math.floor((brightness/255) * (chars.length-1))];
-                        html += `<span style="color:rgb(${r},${g},${b})">${char}</span>`;
+                // Create a temporary canvas to get image data
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = COLS;
+                tempCanvas.height = ROWS;
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                // Draw video to temp canvas
+                tempCtx.drawImage(video, 0, 0, COLS, ROWS);
+                const data = tempCtx.getImageData(0, 0, COLS, ROWS).data;
+
+                // Clear main canvas
+                ctx.fillStyle = "black";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.font = `${charH}px monospace`;
+
+                for (let y = 0; y < ROWS; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        const i = (y * COLS + x) * 4;
+                        const r = data[i];
+                        const g = data[i+1];
+                        const b = data[i+2];
+
+                        const brightness = (r + g + b) / 3;
+                        const charIdx = Math.floor((brightness / 255) * (CHARS.length - 1));
+                        const char = CHARS[charIdx];
+
+                        ctx.fillStyle = `rgb(${r},${g},${b})`;
+                        ctx.fillText(char, x * charW, y * charH);
                     }
-                    html += "\n";
                 }
-                asciiContainer.innerHTML = html;
             }
             requestAnimationFrame(render);
         }
 
-        video.addEventListener('play', () => requestAnimationFrame(render));
-        initCamera();
+        document.getElementById('toggle').onclick = () => {
+            facingMode = facingMode === "user" ? "environment" : "user";
+            setupCamera();
+        };
+
+        video.onloadedmetadata = () => {
+            render();
+        };
+
+        setupCamera();
     </script>
 </body>
 </html>
+

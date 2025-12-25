@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASCII Color Cam</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #0f0;
+            font-family: monospace;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #ascii-container {
+            line-height: 8px;
+            font-size: 8px;
+            white-space: pre;
+            cursor: default;
+        }
+        video { display: none; }
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="ascii-container"></div>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        const asciiContainer = document.getElementById('ascii-container');
+
+        // The ASCII characters sorted by "darkness"
+        const chars = "@%#*+=-:. ";
+        const charLen = chars.length;
+
+        // Resolution: lower means more detail but slower performance
+        const width = 80; 
+        const height = 60;
+
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "user", width: width, height: height }, 
+                    audio: false 
+                });
+                video.srcObject = stream;
+                video.play();
+                requestAnimationFrame(render);
+            } catch (err) {
+                asciiContainer.innerHTML = "Camera access denied or not supported.";
+            }
+        }
+
+        function render() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width = width;
+                canvas.height = height;
+                context.drawImage(video, 0, 0, width, height);
+
+                const imageData = context.getImageData(0, 0, width, height);
+                const pixels = imageData.data;
+                let asciiStr = "";
+
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const index = (y * width + x) * 4;
+                        const r = pixels[index];
+                        const g = pixels[index + 1];
+                        const b = pixels[index + 2];
+
+                        // Calculate brightness (Luminance formula)
+                        const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+                        const charIndex = Math.floor((brightness / 255) * (charLen - 1));
+                        const char = chars[charIndex];
+
+                        // Create colored span for each character
+                        asciiStr += `<span style="color: rgb(${r},${g},${b})">${char}</span>`;
+                    }
+                    asciiStr += "\n";
+                }
+                asciiContainer.innerHTML = asciiStr;
+            }
+            requestAnimationFrame(render);
+        }
+
+        initCamera();
+    </script>
+</body>
+</html>

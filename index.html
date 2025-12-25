@@ -2,33 +2,57 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ASCII Color Cam</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HD ASCII CAM</title>
     <style>
-        body {
-            margin: 0;
-            background-color: #000;
-            color: #0f0;
-            font-family: monospace;
-            overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
+        body { 
+            margin: 0; 
+            background: #000; 
+            color: #fff; 
+            font-family: 'Courier New', monospace; 
+            overflow: hidden; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            height: 100vh; 
         }
-        #ascii-container {
-            line-height: 8px;
-            font-size: 8px;
-            white-space: pre;
-            cursor: default;
+        #ascii-container { 
+            line-height: 6px; 
+            font-size: 6px; 
+            white-space: pre; 
+            letter-spacing: 1px;
+            margin-top: 10px;
         }
-        video { display: none; }
-        canvas { display: none; }
+        .controls { 
+            position: fixed; 
+            bottom: 30px; 
+            display: flex; 
+            gap: 10px; 
+            z-index: 10; 
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 50px;
+        }
+        button { 
+            background: #333; 
+            color: white; 
+            border: 1px solid #555; 
+            padding: 12px 20px; 
+            border-radius: 25px; 
+            font-size: 14px;
+        }
+        video, canvas { display: none; }
     </style>
 </head>
 <body>
 
     <div id="ascii-container"></div>
+    
+    <div class="controls">
+        <button id="switch-btn">🔄 Flip</button>
+        <button id="density-btn">Toggle Detail</button>
+    </div>
+
     <video id="video" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
 
@@ -37,62 +61,74 @@
         const canvas = document.getElementById('canvas');
         const context = canvas.getContext('2d', { willReadFrequently: true });
         const asciiContainer = document.getElementById('ascii-container');
+        const switchBtn = document.getElementById('switch-btn');
+        const densityBtn = document.getElementById('density-btn');
 
-        // The ASCII characters sorted by "darkness"
-        const chars = "@%#*+=-:. ";
-        const charLen = chars.length;
-
-        // Resolution: lower means more detail but slower performance
-        const width = 80; 
-        const height = 60;
+        // Extended character sets
+        const simpleChars = "@%#*+=-:. ";
+        const complexChars = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
+        
+        let chars = complexChars;
+        const width = 70; 
+        const height = 50;
+        let currentFacingMode = "user";
 
         async function initCamera() {
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "user", width: width, height: height }, 
+                    video: { facingMode: currentFacingMode }, 
                     audio: false 
                 });
                 video.srcObject = stream;
-                video.play();
-                requestAnimationFrame(render);
             } catch (err) {
-                asciiContainer.innerHTML = "Camera access denied or not supported.";
+                asciiContainer.innerHTML = "Camera Error: " + err.message;
             }
         }
+
+        switchBtn.addEventListener('click', () => {
+            currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+            initCamera();
+        });
+
+        densityBtn.addEventListener('click', () => {
+            chars = chars.length > 15 ? simpleChars : complexChars;
+        });
 
         function render() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 canvas.width = width;
                 canvas.height = height;
                 context.drawImage(video, 0, 0, width, height);
-
-                const imageData = context.getImageData(0, 0, width, height);
-                const pixels = imageData.data;
-                let asciiStr = "";
+                const pixels = context.getImageData(0, 0, width, height).data;
+                let html = "";
 
                 for (let y = 0; y < height; y++) {
                     for (let x = 0; x < width; x++) {
-                        const index = (y * width + x) * 4;
-                        const r = pixels[index];
-                        const g = pixels[index + 1];
-                        const b = pixels[index + 2];
-
-                        // Calculate brightness (Luminance formula)
+                        const i = (y * width + x) * 4;
+                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                        
+                        // Perceptual brightness
                         const brightness = (0.2126 * r + 0.7152 * g + 0.0722 * b);
-                        const charIndex = Math.floor((brightness / 255) * (charLen - 1));
-                        const char = chars[charIndex];
-
-                        // Create colored span for each character
-                        asciiStr += `<span style="color: rgb(${r},${g},${b})">${char}</span>`;
+                        
+                        // Map brightness to character index
+                        const charIndex = Math.floor((brightness / 256) * chars.length);
+                        const char = chars[charIndex] || " ";
+                        
+                        html += `<span style="color:rgb(${r},${g},${b})">${char}</span>`;
                     }
-                    asciiStr += "\n";
+                    html += "\n";
                 }
-                asciiContainer.innerHTML = asciiStr;
+                asciiContainer.innerHTML = html;
             }
             requestAnimationFrame(render);
         }
 
+        video.addEventListener('play', () => requestAnimationFrame(render));
         initCamera();
     </script>
 </body>
 </html>
+

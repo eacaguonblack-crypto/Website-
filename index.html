@@ -1,100 +1,125 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ULTRA ASCII SMOOTH</title>
-    <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        #output { width: 100vw; height: 100vh; object-fit: cover; font-family: 'Courier New', monospace; font-weight: bold; white-space: pre; background: #000; display: block; }
-        .ui { position: fixed; bottom: 30px; z-index: 10; }
-        button { background: rgba(0, 255, 0, 0.3); color: #0f0; border: 1px solid #0f0; padding: 15px 25px; border-radius: 50px; font-family: monospace; font-size: 16px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-        video { display: none; }
-    </style>
+  <title>Hand Pitch Visualizer</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #121212; color: white; margin: 0; overflow: hidden; }
+    .container { position: relative; width: 100vw; height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+    canvas { border-radius: 15px; box-shadow: 0 0 30px rgba(0, 255, 204, 0.2); max-width: 90%; }
+    #status { font-size: 2rem; margin-bottom: 10px; color: #00ffcc; font-weight: bold; text-shadow: 0 0 10px #00ffcc; }
+    #startBtn { position: absolute; z-index: 10; padding: 20px 40px; font-size: 1.5rem; cursor: pointer; border-radius: 50px; border: none; background: #00ffcc; color: black; font-weight: bold; transition: 0.3s; }
+    #startBtn:hover { transform: scale(1.1); background: #fff; }
+    video { display: none; } /* Hide the raw video feed */
+  </style>
 </head>
 <body>
 
-    <pre id="output"></pre>
-    <video id="video" autoplay playsinline muted></video>
+  <div class="container">
+    <div id="status">Pinch Fingers to Play</div>
+    <button id="startBtn">START THEREMIN</button>
+    <canvas id="output_canvas" width="1280" height="720"></canvas>
+    <video id="input_video"></video>
+  </div>
 
-    <div class="ui">
-        <button id="toggle">ROTATE CAMERA</button>
-    </div>
+  <script>
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const statusDiv = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
 
-    <script>
-        const video = document.getElementById('video');
-        const output = document.getElementById('output');
-        
-        // --- PERFORMANCE TUNING ---
-        // 200 is the 'Smooth Max'. You can try 250, but 200 usually keeps 60fps.
-        const COLS = 200; 
-        const ASPECT_RATIO = 3/4; // Rectangular
-        const ROWS = Math.floor(COLS * ASPECT_RATIO);
-        const CHARS = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
-        // --------------------------
+    let audioCtx, oscillator, gainNode;
+    let audioStarted = false;
 
-        let facingMode = "environment";
-        const tempCanvas = document.createElement('canvas');
-        const tCtx = tempCanvas.getContext('2d', { alpha: false });
+    function initAudio() {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      oscillator = audioCtx.createOscillator();
+      gainNode = audioCtx.createGain();
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.start();
+      audioStarted = true;
+      startBtn.style.display = 'none';
+    }
 
-        async function init() {
-            if (window.stream) window.stream.getTracks().forEach(t => t.stop());
-            try {
-                const s = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: facingMode, width: { ideal: 640 }, height: { ideal: 480 } }
-                });
-                window.stream = s;
-                video.srcObject = s;
-            } catch (e) { console.error(e); }
+    startBtn.addEventListener('click', initAudio);
+
+    function onResults(results) {
+      // 1. Draw the Video Frame
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        for (const landmarks of results.multiHandLandmarks) {
+          const thumb = landmarks[4];
+          const index = landmarks[8];
+
+          // Calculate Distance
+          const distance = Math.sqrt(Math.pow(thumb.x - index.x, 2) + Math.pow(thumb.y - index.y, 2));
+
+          // Handle Audio
+          if (audioStarted) {
+            const freq = Math.max(150, Math.min(1200, distance * 3500));
+            oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
+            gainNode.gain.setTargetAtTime(0.2, audioCtx.currentTime, 0.05);
+            statusDiv.innerText = `${Math.round(freq)} Hz`;
+          }
+
+          // 2. Visual Highlights
+          // Draw line between fingers
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(thumb.x * canvasElement.width, thumb.y * canvasElement.height);
+          canvasCtx.lineTo(index.x * canvasElement.width, index.y * canvasElement.height);
+          canvasCtx.strokeStyle = "#00ffcc";
+          canvasCtx.lineWidth = 5;
+          canvasCtx.stroke();
+
+          // Draw Thumb Tip
+          canvasCtx.beginPath();
+          canvasCtx.arc(thumb.x * canvasElement.width, thumb.y * canvasElement.height, 12, 0, 2 * Math.PI);
+          canvasCtx.fillStyle = "#ff0077";
+          canvasCtx.fill();
+
+          // Draw Index Tip
+          canvasCtx.beginPath();
+          canvasCtx.arc(index.x * canvasElement.width, index.y * canvasElement.height, 12, 0, 2 * Math.PI);
+          canvasCtx.fillStyle = "#00ffcc";
+          canvasCtx.fill();
         }
+      } else {
+        if (audioStarted) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+        statusDiv.innerText = "Show your hand";
+      }
+      canvasCtx.restore();
+    }
 
-        function update() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                tempCanvas.width = COLS;
-                tempCanvas.height = ROWS;
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
 
-                // Process image in memory
-                tCtx.drawImage(video, 0, 0, COLS, ROWS);
-                const pixels = tCtx.getImageData(0, 0, COLS, ROWS).data;
-                
-                let asciiFrame = "";
-                for (let y = 0; y < ROWS; y++) {
-                    for (let x = 0; x < COLS; x++) {
-                        const i = (y * COLS + x) * 4;
-                        const r = pixels[i];
-                        const g = pixels[i+1];
-                        const b = pixels[i+2];
-                        
-                        // Fast brightness calc
-                        const avg = (r + g + b) / 3;
-                        const char = CHARS[Math.floor((avg / 255) * (CHARS.length - 1))];
-                        
-                        // We use hex colors for the text - this is the fastest way to render color text
-                        asciiFrame += `<span style="color:rgb(${r},${g},${b})">${char}</span>`;
-                    }
-                    asciiFrame += "\n";
-                }
-                output.innerHTML = asciiFrame;
-            }
-            requestAnimationFrame(update);
-        }
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
+    });
+    hands.onResults(onResults);
 
-        // Adjust font size to fit screen perfectly
-        function adjustLayout() {
-            const fontSize = window.innerWidth / COLS * 1.8;
-            output.style.fontSize = fontSize + "px";
-            output.style.lineHeight = (fontSize * 0.8) + "px";
-        }
-
-        document.getElementById('toggle').onclick = () => {
-            facingMode = (facingMode === "user") ? "environment" : "user";
-            init();
-        };
-
-        window.addEventListener('resize', adjustLayout);
-        video.onloadedmetadata = () => {
-            adjustLayout();
-            update();
+    const camera = new Camera(videoElement, {
+      onFrame: async () => { await hands.send({image: videoElement}); },
+      width: 1280,
+      height: 720
+    });
+    camera.start();
+  </script>
+</body>
+</html>
         };
 
         init();

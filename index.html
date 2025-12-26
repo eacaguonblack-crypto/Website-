@@ -2,129 +2,118 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Fixed Dual Synth</title>
+    <title>Debug Dual Synth</title>
     <style>
-        body { margin: 0; background: #000; color: #0f0; font-family: monospace; overflow: hidden; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #0f0; }
+        body { margin: 0; background: #111; color: #fff; font-family: monospace; overflow: hidden; }
+        #log { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; font-size: 10px; max-height: 100px; overflow-y: auto; width: 300px; border: 1px solid #444; z-index: 100; }
         canvas { width: 100vw; height: 100vh; object-fit: contain; }
-        #startBtn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 30px; font-size: 20px; z-index: 20; background: #0f0; cursor: pointer; }
+        #startBtn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 25px; z-index: 20; background: cyan; font-weight: bold; cursor: pointer; }
         video { display: none; }
     </style>
 </head>
 <body>
 
-    <div id="ui">
-        <div id="status">Status: Loading AI...</div>
-        <div id="data">Right: --- | Left: ---</div>
-    </div>
-
-    <button id="startBtn">CLICK TO START SENSORS</button>
+    <div id="log">--- System Logs ---<br></div>
+    <button id="startBtn">1. INITIALIZE SYSTEM</button>
     <video id="webcam" playsinline></video>
     <canvas id="output_canvas"></canvas>
 
     <script type="module">
         import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
+        const logDiv = document.getElementById("log");
+        function logger(msg) { logDiv.innerHTML += `> ${msg}<br>`; logDiv.scrollTop = logDiv.scrollHeight; }
+
         const video = document.getElementById("webcam");
         const canvasElement = document.getElementById("output_canvas");
         const canvasCtx = canvasElement.getContext("2d");
         const startBtn = document.getElementById("startBtn");
-        const status = document.getElementById("status");
-        const dataBox = document.getElementById("data");
 
         let handLandmarker;
         let audioCtx, oscillator, gainNode;
 
-        // 1. Load AI Models safely
-        async function loadAI() {
+        async function initAI() {
             try {
+                logger("Fetching MediaPipe files...");
                 const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+                
+                logger("Loading Model (this may take a sec)...");
                 handLandmarker = await HandLandmarker.createFromOptions(vision, {
                     baseOptions: { 
                         modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-                        delegate: "GPU" 
+                        delegate: "CPU" // Switched to CPU for stability
                     },
                     runningMode: "VIDEO",
                     numHands: 2
                 });
-                status.innerText = "Status: AI Ready. Click Start.";
-            } catch (e) {
-                status.innerText = "Status: AI Load Failed: " + e.message;
+                logger("AI Ready!");
+                startBtn.innerText = "2. START CAMERA & SOUND";
+            } catch (err) {
+                logger("ERROR: " + err.message);
             }
         }
-        loadAI();
 
-        // 2. Start Audio/Video on Click
+        initAI();
+
         startBtn.addEventListener("click", async () => {
+            if (!handLandmarker) return logger("Wait for AI to load...");
+            
             try {
+                logger("Starting Audio...");
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 oscillator = audioCtx.createOscillator();
                 gainNode = audioCtx.createGain();
-                oscillator.type = "sine";
                 gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
                 oscillator.connect(gainNode);
                 gainNode.connect(audioCtx.destination);
                 oscillator.start();
 
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                logger("Requesting Camera...");
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
                 video.srcObject = stream;
-                video.play();
+                await video.play();
+                
                 startBtn.style.display = "none";
-                status.innerText = "Status: Running...";
+                logger("System Live.");
                 requestAnimationFrame(loop);
-            } catch (e) {
-                alert("Init Error: " + e.message);
+            } catch (err) {
+                logger("START ERROR: " + err.message);
             }
         });
 
-        // 3. Robust Detection Loop
         function loop() {
-            if (video.readyState === 4) {
-                canvasElement.width = video.videoWidth;
-                canvasElement.height = video.videoHeight;
-                
+            if (video.readyState >= 2) {
                 const results = handLandmarker.detectForVideo(video, performance.now());
                 
-                canvasCtx.save();
+                canvasElement.width = video.videoWidth;
+                canvasElement.height = video.videoHeight;
                 canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                
+                // Draw mirrored video
+                canvasCtx.save();
                 canvasCtx.translate(canvasElement.width, 0);
                 canvasCtx.scale(-1, 1);
                 canvasCtx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
 
-                let activeRight = false;
-                let activeLeft = false;
+                let rHand = false;
+                let lHand = false;
 
-                if (results.landmarks && results.landmarks.length > 0) {
-                    results.landmarks.forEach((landmarks, i) => {
-                        const side = results.handedness[i][0].categoryName;
-                        const t = landmarks[4]; // Thumb
-                        const f = landmarks[8]; // Index
-                        const dist = Math.hypot(t.x - f.x, t.y - f.y);
+                if (results.landmarks) {
+                    results.landmarks.forEach((pts, i) => {
+                        const label = results.handedness[i][0].categoryName;
+                        const dist = Math.hypot(pts[4].x - pts[8].x, pts[4].y - pts[8].y);
 
-                        if (side === "Right") {
-                            activeRight = true;
-                            const freq = 200 + (dist * 2000);
-                            if (!isNaN(freq)) oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
+                        if (label === "Right") {
+                            rHand = true;
+                            oscillator.frequency.setTargetAtTime(200 + (dist * 2500), audioCtx.currentTime, 0.05);
                         } else {
-                            activeLeft = true;
-                            const vol = Math.min(0.5, dist * 2);
-                            if (!isNaN(vol)) gainNode.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.05);
+                            lHand = true;
+                            gainNode.gain.setTargetAtTime(Math.min(0.3, dist * 2), audioCtx.currentTime, 0.05);
                         }
-
-                        // Draw visual line
-                        canvasCtx.strokeStyle = side === "Right" ? "#0f0" : "#f0f";
-                        canvasCtx.lineWidth = 10;
-                        canvasCtx.beginPath();
-                        canvasCtx.moveTo(t.x * canvasElement.width, t.y * canvasElement.height);
-                        canvasCtx.lineTo(f.x * canvasElement.width, f.y * canvasElement.height);
-                        canvasCtx.stroke();
                     });
                 }
 
-                // Fade out if hands leave
-                if (!activeLeft) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
-                
-                dataBox.innerText = `R: ${activeRight ? 'OK' : '--'} | L: ${activeLeft ? 'OK' : '--'}`;
+                if (!lHand && audioCtx) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
                 canvasCtx.restore();
             }
             requestAnimationFrame(loop);

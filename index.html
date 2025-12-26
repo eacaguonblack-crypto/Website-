@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Multi-Face Mask Deleter</title>
+  <title>Face Mask Toggle</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
   <style>
@@ -19,12 +19,19 @@
   const canvasElement = document.getElementById('output_canvas');
   const canvasCtx = canvasElement.getContext('2d');
 
-  // Track deleted faces and current face positions
   let deletedFaceIds = new Set();
   let activeFaces = []; 
   const RADIUS = 180;
 
-  // Listen for clicks to "hide" faces
+  // --- WINDOW LOGIC: Fixed Resize ---
+  function resize() {
+    canvasElement.width = window.innerWidth;
+    canvasElement.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- TOGGLE LOGIC ---
   canvasElement.addEventListener('mousedown', (event) => {
     const rect = canvasElement.getBoundingClientRect();
     const mouseX = event.clientX - rect.left;
@@ -33,48 +40,60 @@
     activeFaces.forEach((face) => {
       const dx = mouseX - face.x;
       const dy = mouseY - face.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-
-      // If clicked inside the circle, add its unique index to the deleted set
-      if (distance < RADIUS) {
-        deletedFaceIds.add(face.id);
+      if (Math.sqrt(dx * dx + dy * dy) < RADIUS) {
+        // Toggle: if it's there, remove it. If not, add it.
+        if (deletedFaceIds.has(face.id)) {
+          deletedFaceIds.delete(face.id);
+        } else {
+          deletedFaceIds.add(face.id);
+        }
       }
     });
   });
 
   function onResults(results) {
-    canvasElement.width = window.innerWidth;
-    canvasElement.height = window.innerHeight;
-
+    // Clear background
     canvasCtx.save();
     canvasCtx.fillStyle = 'black';
     canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
-
-    activeFaces = []; // Reset active tracking for this frame
+    
+    activeFaces = []; 
 
     if (results.multiFaceLandmarks) {
       results.multiFaceLandmarks.forEach((landmarks, index) => {
-        // Skip if this face index has been clicked
-        if (deletedFaceIds.has(index)) return;
-
         const noseTip = landmarks[4];
         const centerX = (1 - noseTip.x) * canvasElement.width;
         const centerY = noseTip.y * canvasElement.height;
 
-        // Save position for click detection
         activeFaces.push({ id: index, x: centerX, y: centerY });
 
-        // Draw individual mask
+        const isOffed = deletedFaceIds.has(index);
+
         canvasCtx.save();
+        
+        // Create the circular mask
         canvasCtx.beginPath();
         canvasCtx.arc(centerX, centerY, RADIUS, 0, Math.PI * 2);
         canvasCtx.clip();
 
-        // Draw mirrored video for this specific mask
+        // Apply grayscale filter if "offed"
+        if (isOffed) {
+          canvasCtx.filter = 'grayscale(100%) brightness(40%)';
+        }
+
+        // Draw mirrored video
         canvasCtx.translate(canvasElement.width, 0);
         canvasCtx.scale(-1, 1);
         canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        
         canvasCtx.restore();
+
+        // Optional: Draw a thin ring to show where the hit-box is
+        canvasCtx.beginPath();
+        canvasCtx.arc(centerX, centerY, RADIUS, 0, Math.PI * 2);
+        canvasCtx.strokeStyle = isOffed ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)';
+        canvasCtx.lineWidth = 2;
+        canvasCtx.stroke();
       });
     }
     canvasCtx.restore();
@@ -85,7 +104,7 @@
   }});
 
   faceMesh.setOptions({
-    maxNumFaces: 5, // Increased to support multiple people
+    maxNumFaces: 5,
     refineLandmarks: false,
     minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
@@ -104,4 +123,3 @@
 </script>
 </body>
 </html>
-

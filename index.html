@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Circular Face Mask</title>
+  <title>Multi-Face Mask Deleter</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
   <style>
-    body { margin: 0; background: #000; overflow: hidden; }
+    body { margin: 0; background: #000; overflow: hidden; cursor: crosshair; }
     #output_canvas { width: 100vw; height: 100vh; object-fit: cover; }
-    #video_input { display: none; } /* Hide raw video */
+    #video_input { display: none; }
   </style>
 </head>
 <body>
@@ -19,39 +19,64 @@
   const canvasElement = document.getElementById('output_canvas');
   const canvasCtx = canvasElement.getContext('2d');
 
+  // Track deleted faces and current face positions
+  let deletedFaceIds = new Set();
+  let activeFaces = []; 
+  const RADIUS = 180;
+
+  // Listen for clicks to "hide" faces
+  canvasElement.addEventListener('mousedown', (event) => {
+    const rect = canvasElement.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    activeFaces.forEach((face) => {
+      const dx = mouseX - face.x;
+      const dy = mouseY - face.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // If clicked inside the circle, add its unique index to the deleted set
+      if (distance < RADIUS) {
+        deletedFaceIds.add(face.id);
+      }
+    });
+  });
+
   function onResults(results) {
-    // Set canvas size to match window
     canvasElement.width = window.innerWidth;
     canvasElement.height = window.innerHeight;
 
     canvasCtx.save();
-    
-    // 1. Clear screen with black
     canvasCtx.fillStyle = 'black';
     canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-      const landmarks = results.multiFaceLandmarks[0];
-      
-      // Calculate center of face (using the nose bridge area)
-      const noseTip = landmarks[4];
-      const centerX = (1 - noseTip.x) * canvasElement.width; // (1-x) to mirror
-      const centerY = noseTip.y * canvasElement.height;
+    activeFaces = []; // Reset active tracking for this frame
 
-      // Define mask radius (adjust '200' to change size)
-      const radius = 180;
+    if (results.multiFaceLandmarks) {
+      results.multiFaceLandmarks.forEach((landmarks, index) => {
+        // Skip if this face index has been clicked
+        if (deletedFaceIds.has(index)) return;
 
-      // 2. Create the Circular Mask
-      canvasCtx.beginPath();
-      canvasCtx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      canvasCtx.clip();
+        const noseTip = landmarks[4];
+        const centerX = (1 - noseTip.x) * canvasElement.width;
+        const centerY = noseTip.y * canvasElement.height;
 
-      // 3. Draw mirrored video inside the circle
-      canvasCtx.translate(canvasElement.width, 0);
-      canvasCtx.scale(-1, 1);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        // Save position for click detection
+        activeFaces.push({ id: index, x: centerX, y: centerY });
+
+        // Draw individual mask
+        canvasCtx.save();
+        canvasCtx.beginPath();
+        canvasCtx.arc(centerX, centerY, RADIUS, 0, Math.PI * 2);
+        canvasCtx.clip();
+
+        // Draw mirrored video for this specific mask
+        canvasCtx.translate(canvasElement.width, 0);
+        canvasCtx.scale(-1, 1);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.restore();
+      });
     }
-    
     canvasCtx.restore();
   }
 
@@ -60,7 +85,7 @@
   }});
 
   faceMesh.setOptions({
-    maxNumFaces: 1,
+    maxNumFaces: 5, // Increased to support multiple people
     refineLandmarks: false,
     minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
@@ -77,8 +102,6 @@
   });
   camera.start();
 </script>
-</body>
-</html>
 </body>
 </html>
 

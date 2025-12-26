@@ -1,76 +1,58 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Dragon Face Mapper</title>
+  <title>Circular Face Mask</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
   <style>
-    body { margin: 0; background: #000; overflow: hidden; color: gold; font-family: sans-serif; }
-    video, canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; }
-    #ui { position: absolute; bottom: 20px; left: 20px; z-index: 10; pointer-events: none; }
+    body { margin: 0; background: #000; overflow: hidden; }
+    #output_canvas { width: 100vw; height: 100vh; object-fit: cover; }
+    #video_input { display: none; } /* Hide raw video */
   </style>
 </head>
 <body>
-  <div id="ui"><h1>DRAGON MAPPING ACTIVE</h1><p>Align face to camera...</p></div>
-  <video id="input_video"></video>
+  <video id="video_input"></video>
   <canvas id="output_canvas"></canvas>
 
 <script type="module">
-  const videoElement = document.getElementById('input_video');
+  const videoElement = document.getElementById('video_input');
   const canvasElement = document.getElementById('output_canvas');
   const canvasCtx = canvasElement.getContext('2d');
 
   function onResults(results) {
+    // Set canvas size to match window
     canvasElement.width = window.innerWidth;
     canvasElement.height = window.innerHeight;
+
     canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     
-    // 1. Mirror the video
-    canvasCtx.translate(canvasElement.width, 0);
-    canvasCtx.scale(-1, 1);
+    // 1. Clear screen with black
+    canvasCtx.fillStyle = 'black';
+    canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-    if (results.multiFaceLandmarks) {
-      for (const landmarks of results.multiFaceLandmarks) {
-        // Draw the "Dragon Map" - Neon Green Wireframe
-        canvasCtx.strokeStyle = "#39FF14"; 
-        canvasCtx.lineWidth = 1;
+    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+      const landmarks = results.multiFaceLandmarks[0];
+      
+      // Calculate center of face (using the nose bridge area)
+      const noseTip = landmarks[4];
+      const centerX = (1 - noseTip.x) * canvasElement.width; // (1-x) to mirror
+      const centerY = noseTip.y * canvasElement.height;
 
-        // Draw the skeletal mesh
-        for (let i = 0; i < landmarks.length; i += 5) {
-          const pt = landmarks[i];
-          const x = pt.x * canvasElement.width;
-          const y = pt.y * canvasElement.height;
-          
-          // Connect points to create a "scaly" look
-          canvasCtx.beginPath();
-          canvasCtx.arc(x, y, 2, 0, 2 * Math.PI);
-          canvasCtx.stroke();
-          
-          if(i % 10 === 0) {
-             canvasCtx.moveTo(x, y);
-             canvasCtx.lineTo(x + (Math.random() * 20), y - (Math.random() * 20));
-             canvasCtx.stroke();
-          }
-        }
+      // Define mask radius (adjust '200' to change size)
+      const radius = 180;
 
-        // Draw Dragon Eyes
-        const leftEye = landmarks[159];
-        const rightEye = landmarks[386];
-        drawDragonEye(leftEye.x * canvasElement.width, leftEye.y * canvasElement.height);
-        drawDragonEye(rightEye.x * canvasElement.width, rightEye.y * canvasElement.height);
-      }
+      // 2. Create the Circular Mask
+      canvasCtx.beginPath();
+      canvasCtx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      canvasCtx.clip();
+
+      // 3. Draw mirrored video inside the circle
+      canvasCtx.translate(canvasElement.width, 0);
+      canvasCtx.scale(-1, 1);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
     }
+    
     canvasCtx.restore();
-  }
-
-  function drawDragonEye(x, y) {
-    canvasCtx.fillStyle = "rgba(255, 100, 0, 0.7)";
-    canvasCtx.beginPath();
-    canvasCtx.ellipse(x, y, 15, 25, 0, 0, Math.PI * 2);
-    canvasCtx.fill();
-    canvasCtx.fillStyle = "black";
-    canvasCtx.fillRect(x - 2, y - 15, 4, 30); // Slit pupil
   }
 
   const faceMesh = new FaceMesh({locateFile: (file) => {
@@ -79,10 +61,11 @@
 
   faceMesh.setOptions({
     maxNumFaces: 1,
-    refineLandmarks: true,
+    refineLandmarks: false,
     minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
   });
+  
   faceMesh.onResults(onResults);
 
   const camera = new Camera(videoElement, {
@@ -94,7 +77,8 @@
   });
   camera.start();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</body>
+</html>
 </body>
 </html>
 

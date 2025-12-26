@@ -2,27 +2,24 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Dual Hand Synth</title>
+    <title>Fixed Dual Synth</title>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        canvas { width: 100vw; height: 100vh; object-fit: cover; }
-        #ui { position: absolute; top: 20px; left: 20px; z-index: 2; background: rgba(0,0,0,0.6); padding: 20px; border-radius: 10px; border-left: 5px solid #00ffcc; }
-        #btn { position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px 40px; font-size: 20px; background: #ff0077; color: white; border: none; font-weight: bold; cursor: pointer; border-radius: 50px; box-shadow: 0 0 20px #ff0077; }
-        .label { color: #00ffcc; font-size: 12px; text-transform: uppercase; }
+        body { margin: 0; background: #000; color: #0f0; font-family: monospace; overflow: hidden; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #0f0; }
+        canvas { width: 100vw; height: 100vh; object-fit: contain; }
+        #startBtn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 30px; font-size: 20px; z-index: 20; background: #0f0; cursor: pointer; }
         video { display: none; }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <div class="label">Right Hand (Pitch)</div>
-        <h2 id="freqText">0 Hz</h2>
-        <div class="label">Left Hand (Volume)</div>
-        <h2 id="volText">0 %</h2>
+        <div id="status">Status: Loading AI...</div>
+        <div id="data">Right: --- | Left: ---</div>
     </div>
 
-    <button id="btn">START DUAL SYNTH</button>
-    <video id="webcam" autoplay playsinline></video>
+    <button id="startBtn">CLICK TO START SENSORS</button>
+    <video id="webcam" playsinline></video>
     <canvas id="output_canvas"></canvas>
 
     <script type="module">
@@ -31,102 +28,106 @@
         const video = document.getElementById("webcam");
         const canvasElement = document.getElementById("output_canvas");
         const canvasCtx = canvasElement.getContext("2d");
-        const freqText = document.getElementById("freqText");
-        const volText = document.getElementById("volText");
-        const btn = document.getElementById("btn");
+        const startBtn = document.getElementById("startBtn");
+        const status = document.getElementById("status");
+        const dataBox = document.getElementById("data");
 
         let handLandmarker;
         let audioCtx, oscillator, gainNode;
-        let lastVideoTime = -1;
 
-        const setupHands = async () => {
-            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
-            handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                baseOptions: { 
-                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-                    delegate: "GPU" 
-                },
-                runningMode: "VIDEO",
-                numHands: 2 // Enable both hands
-            });
-        };
-        setupHands();
+        // 1. Load AI Models safely
+        async function loadAI() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: { 
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                        delegate: "GPU" 
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 2
+                });
+                status.innerText = "Status: AI Ready. Click Start.";
+            } catch (e) {
+                status.innerText = "Status: AI Load Failed: " + e.message;
+            }
+        }
+        loadAI();
 
-        btn.addEventListener("click", () => {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            oscillator = audioCtx.createOscillator();
-            gainNode = audioCtx.createGain();
-            
-            oscillator.type = "sawtooth"; // Grittier sound for dual control
-            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            oscillator.start();
+        // 2. Start Audio/Video on Click
+        startBtn.addEventListener("click", async () => {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                oscillator = audioCtx.createOscillator();
+                gainNode = audioCtx.createGain();
+                oscillator.type = "sine";
+                gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                oscillator.start();
 
-            navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
-                video.addEventListener("loadeddata", predictWebcam);
-                btn.style.display = "none";
-            });
+                video.play();
+                startBtn.style.display = "none";
+                status.innerText = "Status: Running...";
+                requestAnimationFrame(loop);
+            } catch (e) {
+                alert("Init Error: " + e.message);
+            }
         });
 
-        async function predictWebcam() {
-            canvasElement.width = video.videoWidth;
-            canvasElement.height = video.videoHeight;
-
-            if (video.currentTime !== lastVideoTime) {
-                lastVideoTime = video.currentTime;
+        // 3. Robust Detection Loop
+        function loop() {
+            if (video.readyState === 4) {
+                canvasElement.width = video.videoWidth;
+                canvasElement.height = video.videoHeight;
+                
                 const results = handLandmarker.detectForVideo(video, performance.now());
-
+                
                 canvasCtx.save();
                 canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
                 canvasCtx.translate(canvasElement.width, 0);
                 canvasCtx.scale(-1, 1);
                 canvasCtx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
 
-                let handVisible = false;
+                let activeRight = false;
+                let activeLeft = false;
 
                 if (results.landmarks && results.landmarks.length > 0) {
-                    handVisible = true;
-                    results.landmarks.forEach((landmarks, index) => {
-                        const label = results.handedness[index][0].categoryName; // "Left" or "Right"
-                        const thumb = landmarks[4];
-                        const finger = landmarks[8];
-                        const dist = Math.hypot(thumb.x - finger.x, thumb.y - finger.y);
+                    results.landmarks.forEach((landmarks, i) => {
+                        const side = results.handedness[i][0].categoryName;
+                        const t = landmarks[4]; // Thumb
+                        const f = landmarks[8]; // Index
+                        const dist = Math.hypot(t.x - f.x, t.y - f.y);
 
-                        // Because the camera is mirrored, we check the MediaPipe label
-                        if (label === "Right") {
-                            // Control Pitch
-                            const freq = 100 + (dist * 4000);
-                            oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
-                            freqText.innerText = `${Math.round(freq)} Hz`;
-                            drawPinch(thumb, finger, "#00ffcc");
+                        if (side === "Right") {
+                            activeRight = true;
+                            const freq = 200 + (dist * 2000);
+                            if (!isNaN(freq)) oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
                         } else {
-                            // Control Volume
-                            const vol = Math.min(1, dist * 3);
-                            gainNode.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.05);
-                            volText.innerText = `${Math.round(vol * 100)} %`;
-                            drawPinch(thumb, finger, "#ff0077");
+                            activeLeft = true;
+                            const vol = Math.min(0.5, dist * 2);
+                            if (!isNaN(vol)) gainNode.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.05);
                         }
+
+                        // Draw visual line
+                        canvasCtx.strokeStyle = side === "Right" ? "#0f0" : "#f0f";
+                        canvasCtx.lineWidth = 10;
+                        canvasCtx.beginPath();
+                        canvasCtx.moveTo(t.x * canvasElement.width, t.y * canvasElement.height);
+                        canvasCtx.lineTo(f.x * canvasElement.width, f.y * canvasElement.height);
+                        canvasCtx.stroke();
                     });
                 }
 
-                if (!handVisible && audioCtx) {
-                    gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
-                }
+                // Fade out if hands leave
+                if (!activeLeft) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+                
+                dataBox.innerText = `R: ${activeRight ? 'OK' : '--'} | L: ${activeLeft ? 'OK' : '--'}`;
                 canvasCtx.restore();
             }
-            window.requestAnimationFrame(predictWebcam);
-        }
-
-        function drawPinch(p1, p2, color) {
-            canvasCtx.strokeStyle = color;
-            canvasCtx.lineWidth = 10;
-            canvasCtx.lineCap = "round";
-            canvasCtx.beginPath();
-            canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
-            canvasCtx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
-            canvasCtx.stroke();
+            requestAnimationFrame(loop);
         }
     </script>
 </body>

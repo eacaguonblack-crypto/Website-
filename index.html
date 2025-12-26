@@ -1,70 +1,100 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
-  <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+  <title>Dragon Face Mapper</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
-    body { margin: 0; display: flex; justify-content: center; background: #1a1a1a; }
-    canvas { border: 2px solid #d4af37; }
+    body { margin: 0; background: #000; overflow: hidden; color: gold; font-family: sans-serif; }
+    video, canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; }
+    #ui { position: absolute; bottom: 20px; left: 20px; z-index: 10; pointer-events: none; }
   </style>
 </head>
 <body>
-<script>
-  let faceMesh;
-  let video;
-  let faces = [];
+  <div id="ui"><h1>DRAGON MAPPING ACTIVE</h1><p>Align face to camera...</p></div>
+  <video id="input_video"></video>
+  <canvas id="output_canvas"></canvas>
 
-  function preload() {
-    // Load the FaceMesh model
-    faceMesh = ml5.faceMesh({ maxFaces: 1, refineLandmarks: false });
-  }
+<script type="module">
+  const videoElement = document.getElementById('input_video');
+  const canvasElement = document.getElementById('output_canvas');
+  const canvasCtx = canvasElement.getContext('2d');
 
-  function setup() {
-    createCanvas(640, 480);
-    video = createCapture(VIDEO);
-    video.size(640, 480);
-    video.hide();
-    faceMesh.detectStart(video, gotFaces);
-  }
+  function onResults(results) {
+    canvasElement.width = window.innerWidth;
+    canvasElement.height = window.innerHeight;
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    
+    // 1. Mirror the video
+    canvasCtx.translate(canvasElement.width, 0);
+    canvasCtx.scale(-1, 1);
 
-  function gotFaces(results) {
-    faces = results;
-  }
+    if (results.multiFaceLandmarks) {
+      for (const landmarks of results.multiFaceLandmarks) {
+        // Draw the "Dragon Map" - Neon Green Wireframe
+        canvasCtx.strokeStyle = "#39FF14"; 
+        canvasCtx.lineWidth = 1;
 
-  function draw() {
-    image(video, 0, 0, width, height);
+        // Draw the skeletal mesh
+        for (let i = 0; i < landmarks.length; i += 5) {
+          const pt = landmarks[i];
+          const x = pt.x * canvasElement.width;
+          const y = pt.y * canvasElement.height;
+          
+          // Connect points to create a "scaly" look
+          canvasCtx.beginPath();
+          canvasCtx.arc(x, y, 2, 0, 2 * Math.PI);
+          canvasCtx.stroke();
+          
+          if(i % 10 === 0) {
+             canvasCtx.moveTo(x, y);
+             canvasCtx.lineTo(x + (Math.random() * 20), y - (Math.random() * 20));
+             canvasCtx.stroke();
+          }
+        }
 
-    if (faces.length > 0) {
-      let face = faces[0];
-      
-      // Draw Dragon "Mapping" Lines
-      stroke(0, 255, 100); // Dragon green
-      strokeWeight(2);
-      noFill();
-
-      // Example: Mapping the jawline into a dragon's snout
-      beginShape();
-      for (let i = 0; i < face.keypoints.length; i++) {
-        let keypoint = face.keypoints[i];
-        
-        // Add "Jitter" or scaling to make it look more reptilian
-        let x = keypoint.x;
-        let y = keypoint.y;
-        
-        // Logic to extend the nose/mouth area could go here
-        vertex(x, y);
+        // Draw Dragon Eyes
+        const leftEye = landmarks[159];
+        const rightEye = landmarks[386];
+        drawDragonEye(leftEye.x * canvasElement.width, leftEye.y * canvasElement.height);
+        drawDragonEye(rightEye.x * canvasElement.width, rightEye.y * canvasElement.height);
       }
-      endShape();
-
-      // Draw "Glowing Dragon Eyes"
-      fill(255, 200, 0, 150);
-      let leftEye = face.keypoints[159];
-      let rightEye = face.keypoints[386];
-      ellipse(leftEye.x, leftEye.y, 20, 30);
-      ellipse(rightEye.x, rightEye.y, 20, 30);
     }
+    canvasCtx.restore();
   }
+
+  function drawDragonEye(x, y) {
+    canvasCtx.fillStyle = "rgba(255, 100, 0, 0.7)";
+    canvasCtx.beginPath();
+    canvasCtx.ellipse(x, y, 15, 25, 0, 0, Math.PI * 2);
+    canvasCtx.fill();
+    canvasCtx.fillStyle = "black";
+    canvasCtx.fillRect(x - 2, y - 15, 4, 30); // Slit pupil
+  }
+
+  const faceMesh = new FaceMesh({locateFile: (file) => {
+    return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+  }});
+
+  faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  faceMesh.onResults(onResults);
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => {
+      await faceMesh.send({image: videoElement});
+    },
+    width: 1280,
+    height: 720
+  });
+  camera.start();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </body>
 </html>
 

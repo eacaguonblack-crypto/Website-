@@ -2,104 +2,132 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Hand Pitch Pro</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <style>
-    body { margin: 0; background: #000; color: #0f0; font-family: monospace; text-align: center; overflow: hidden; }
-    canvas { width: 100vw; height: 100vh; object-fit: contain; }
-    #ui { position: absolute; top: 20px; width: 100%; pointer-events: none; }
-    #startBtn { 
-        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        padding: 20px 40px; font-size: 20px; background: #0f0; color: #000; 
-        border: none; cursor: pointer; font-weight: bold; pointer-events: all;
-    }
-  </style>
+    <title>Dual Hand Synth</title>
+    <style>
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
+        canvas { width: 100vw; height: 100vh; object-fit: cover; }
+        #ui { position: absolute; top: 20px; left: 20px; z-index: 2; background: rgba(0,0,0,0.6); padding: 20px; border-radius: 10px; border-left: 5px solid #00ffcc; }
+        #btn { position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px 40px; font-size: 20px; background: #ff0077; color: white; border: none; font-weight: bold; cursor: pointer; border-radius: 50px; box-shadow: 0 0 20px #ff0077; }
+        .label { color: #00ffcc; font-size: 12px; text-transform: uppercase; }
+        video { display: none; }
+    </style>
 </head>
 <body>
 
-  <div id="ui">
-    <h1 id="pitchDisp">0 Hz</h1>
-    <p id="status">Warming up camera...</p>
-  </div>
-  <button id="startBtn">ENABLE AUDIO & CAMERA</button>
-  
-  <video id="input_video" style="display:none"></video>
-  <canvas id="output_canvas"></canvas>
+    <div id="ui">
+        <div class="label">Right Hand (Pitch)</div>
+        <h2 id="freqText">0 Hz</h2>
+        <div class="label">Left Hand (Volume)</div>
+        <h2 id="volText">0 %</h2>
+    </div>
 
-  <script>
-    const videoElement = document.getElementById('input_video');
-    const canvasElement = document.getElementById('output_canvas');
-    const canvasCtx = canvasElement.getContext('2d');
-    const pitchDisp = document.getElementById('pitchDisp');
-    const startBtn = document.getElementById('startBtn');
+    <button id="btn">START DUAL SYNTH</button>
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="output_canvas"></canvas>
 
-    let audioCtx, oscillator, gainNode;
+    <script type="module">
+        import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
-    function initAudio() {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      oscillator = audioCtx.createOscillator();
-      gainNode = audioCtx.createGain();
-      oscillator.type = 'sine';
-      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-      oscillator.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-      oscillator.start();
-      startBtn.style.display = 'none';
-      document.getElementById('status').innerText = "Ready! Show Hand";
-    }
+        const video = document.getElementById("webcam");
+        const canvasElement = document.getElementById("output_canvas");
+        const canvasCtx = canvasElement.getContext("2d");
+        const freqText = document.getElementById("freqText");
+        const volText = document.getElementById("volText");
+        const btn = document.getElementById("btn");
 
-    function onResults(results) {
-      canvasElement.width = videoElement.videoWidth;
-      canvasElement.height = videoElement.videoHeight;
-      
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        let handLandmarker;
+        let audioCtx, oscillator, gainNode;
+        let lastVideoTime = -1;
 
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        const hand = results.multiHandLandmarks[0];
-        const thumb = hand[4];
-        const index = hand[8];
+        const setupHands = async () => {
+            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: { 
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                    delegate: "GPU" 
+                },
+                runningMode: "VIDEO",
+                numHands: 2 // Enable both hands
+            });
+        };
+        setupHands();
 
-        const dist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
-        
-        if (audioCtx) {
-          const freq = 200 + (dist * 4000);
-          oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.03);
-          gainNode.gain.setTargetAtTime(0.1, audioCtx.currentTime, 0.03);
-          pitchDisp.innerText = Math.round(freq) + " Hz";
+        btn.addEventListener("click", () => {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            oscillator = audioCtx.createOscillator();
+            gainNode = audioCtx.createGain();
+            
+            oscillator.type = "sawtooth"; // Grittier sound for dual control
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+
+            navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", predictWebcam);
+                btn.style.display = "none";
+            });
+        });
+
+        async function predictWebcam() {
+            canvasElement.width = video.videoWidth;
+            canvasElement.height = video.videoHeight;
+
+            if (video.currentTime !== lastVideoTime) {
+                lastVideoTime = video.currentTime;
+                const results = handLandmarker.detectForVideo(video, performance.now());
+
+                canvasCtx.save();
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                canvasCtx.translate(canvasElement.width, 0);
+                canvasCtx.scale(-1, 1);
+                canvasCtx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+
+                let handVisible = false;
+
+                if (results.landmarks && results.landmarks.length > 0) {
+                    handVisible = true;
+                    results.landmarks.forEach((landmarks, index) => {
+                        const label = results.handedness[index][0].categoryName; // "Left" or "Right"
+                        const thumb = landmarks[4];
+                        const finger = landmarks[8];
+                        const dist = Math.hypot(thumb.x - finger.x, thumb.y - finger.y);
+
+                        // Because the camera is mirrored, we check the MediaPipe label
+                        if (label === "Right") {
+                            // Control Pitch
+                            const freq = 100 + (dist * 4000);
+                            oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
+                            freqText.innerText = `${Math.round(freq)} Hz`;
+                            drawPinch(thumb, finger, "#00ffcc");
+                        } else {
+                            // Control Volume
+                            const vol = Math.min(1, dist * 3);
+                            gainNode.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.05);
+                            volText.innerText = `${Math.round(vol * 100)} %`;
+                            drawPinch(thumb, finger, "#ff0077");
+                        }
+                    });
+                }
+
+                if (!handVisible && audioCtx) {
+                    gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+                }
+                canvasCtx.restore();
+            }
+            window.requestAnimationFrame(predictWebcam);
         }
 
-        // Visuals
-        canvasCtx.strokeStyle = "#0f0";
-        canvasCtx.lineWidth = 5;
-        canvasCtx.beginPath();
-        canvasCtx.moveTo(thumb.x * canvasElement.width, thumb.y * canvasElement.height);
-        canvasCtx.lineTo(index.x * canvasElement.width, index.y * canvasElement.height);
-        canvasCtx.stroke();
-      } else {
-        if(gainNode) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.03);
-      }
-      canvasCtx.restore();
-    }
-
-    const hands = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
-
-    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5 });
-    hands.onResults(onResults);
-
-    const camera = new Camera(videoElement, {
-      onFrame: async () => { await hands.send({image: videoElement}); },
-      width: 1280, height: 720
-    });
-
-    startBtn.addEventListener('click', () => {
-        initAudio();
-        camera.start().catch(err => alert("Camera error: " + err));
-    });
-  </script>
+        function drawPinch(p1, p2, color) {
+            canvasCtx.strokeStyle = color;
+            canvasCtx.lineWidth = 10;
+            canvasCtx.lineCap = "round";
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
+            canvasCtx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+            canvasCtx.stroke();
+        }
+    </script>
 </body>
 </html>
